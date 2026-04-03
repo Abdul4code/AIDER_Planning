@@ -24,7 +24,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -35,6 +35,7 @@ class RunSummary:
     task_count: int
     passed_count: int
     failed_count: int
+    llm_calls_total: int
     duration_seconds: float
     output_path: str
 
@@ -88,6 +89,12 @@ def parse_single_result(path: Path) -> Tuple[bool, Dict[str, Any]]:
 
     raw = json.loads(path.read_text(encoding="utf-8"))
 
+    if isinstance(raw, dict) and isinstance(raw.get("tests_outcomes"), list):
+        outcomes = [_boolish(v) for v in raw.get("tests_outcomes", [])]
+        outcomes = [v for v in outcomes if v is not None]
+        if outcomes:
+            return any(outcomes), raw
+
     # Common-ish keys observed across tools
     for key in [
         "passed",
@@ -130,6 +137,109 @@ def write_csv(path: Path, row: RunSummary) -> None:
         w.writerow(asdict(row))
 
 
+def _task_row(run_dir: Path, result_path: Path, raw: Dict[str, Any], passed: bool) -> Dict[str, Any]:
+    outcomes = raw.get("tests_outcomes") if isinstance(raw, dict) else None
+    outcomes = outcomes if isinstance(outcomes, list) else []
+    chat_hashes = raw.get("chat_hashes") if isinstance(raw, dict) else None
+    chat_hashes = chat_hashes if isinstance(chat_hashes, list) else []
+    true_count = sum(1 for v in outcomes if _boolish(v) is True)
+    false_count = sum(1 for v in outcomes if _boolish(v) is False)
+
+    return {
+        "task_path": str(result_path.relative_to(run_dir)),
+        "testcase": raw.get("testcase", ""),
+        "passed": passed,
+        "tries_recorded": len(outcomes),
+        "tries_passed": true_count,
+        "tries_failed": false_count,
+        "llm_calls": len(chat_hashes),
+        "duration_seconds": raw.get("duration", ""),
+        "prompt_tokens": raw.get("prompt_tokens", ""),
+        "completion_tokens": raw.get("completion_tokens", ""),
+        "num_error_outputs": raw.get("num_error_outputs", ""),
+        "num_malformed_responses": raw.get("num_malformed_responses", ""),
+        "num_exhausted_context_windows": raw.get("num_exhausted_context_windows", ""),
+        "test_timeouts": raw.get("test_timeouts", ""),
+    }
+
+
+def write_task_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "task_path",
+        "testcase",
+        "passed",
+        "tries_recorded",
+        "tries_passed",
+        "tries_failed",
+        "llm_calls",
+        "duration_seconds",
+        "prompt_tokens",
+        "completion_tokens",
+        "num_error_outputs",
+        "num_malformed_responses",
+        "num_exhausted_context_windows",
+        "test_timeouts",
+    ]
+
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for row in rows:
+            w.writerow(row)
+
+
+def append_task_row(path: Path, row: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "task_path",
+        "testcase",
+        "passed",
+        "tries_recorded",
+        "tries_passed",
+        "tries_failed",
+        "llm_calls",
+        "duration_seconds",
+        "prompt_tokens",
+        "completion_tokens",
+        "num_error_outputs",
+        "num_malformed_responses",
+        "num_exhausted_context_windows",
+        "test_timeouts",
+    ]
+    is_new = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        if is_new:
+            w.writeheader()
+        w.writerow(row)
+
+
+def stream_task_rows(run_dir: Path, out_task_csv: Path, poll_interval: float, stop_file: Optional[Path]) -> int:
+    seen: set[str] = set()
+    while True:
+        if stop_file and stop_file.exists():
+            return 0
+
+        try:
+            files = find_result_files(run_dir)
+        except FileNotFoundError:
+            files = []
+
+        for p in files:
+            key = str(p)
+            if key in seen:
+                continue
+            try:
+                passed, raw = parse_single_result(p)
+            except Exception:
+                continue
+            append_task_row(out_task_csv, _task_row(run_dir, p, raw, passed))
+            seen.add(key)
+
+        time.sleep(max(0.5, poll_interval))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-name", required=True)
@@ -139,16 +249,36 @@ def main() -> int:
     ap.add_argument("--duration-seconds", type=float, default=None, help="Total benchmark duration seconds (optional)")
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-csv", required=True)
+    ap.add_argument("--out-task-csv", default=None, help="Optional per-task CSV output path")
+    ap.add_argument(
+        "--stream-task-csv",
+        action="store_true",
+        help="Watch run-dir and append one CSV row per completed task as .aider.results.json files appear",
+    )
+    ap.add_argument("--poll-interval", type=float, default=2.0, help="Poll interval seconds for --stream-task-csv")
+    ap.add_argument("--stop-file", default=None, help="Optional stop-file path to terminate --stream-task-csv mode")
     args = ap.parse_args()
 
-    start = time.time()
-
     run_dir = Path(args.run_dir)
+
+    if args.stream_task_csv:
+        if not args.out_task_csv:
+            raise SystemExit("--stream-task-csv requires --out-task-csv")
+        return stream_task_rows(
+            run_dir=run_dir,
+            out_task_csv=Path(args.out_task_csv),
+            poll_interval=args.poll_interval,
+            stop_file=Path(args.stop_file) if args.stop_file else None,
+        )
+
+    start = time.time()
     result_files = find_result_files(run_dir)
 
     passed = 0
     failed = 0
+    llm_calls_total = 0
     per_task: List[Dict[str, Any]] = []
+    task_rows: List[Dict[str, Any]] = []
 
     for p in result_files:
         ok, raw = parse_single_result(p)
@@ -156,6 +286,11 @@ def main() -> int:
             passed += 1
         else:
             failed += 1
+
+        if isinstance(raw, dict):
+            chat_hashes = raw.get("chat_hashes")
+            if isinstance(chat_hashes, list):
+                llm_calls_total += len(chat_hashes)
 
         per_task.append(
             {
@@ -166,6 +301,8 @@ def main() -> int:
                 "raw_keys": sorted(list(raw.keys())) if isinstance(raw, dict) else [],
             }
         )
+        if isinstance(raw, dict):
+            task_rows.append(_task_row(run_dir, p, raw, ok))
 
     parse_duration = time.time() - start
 
@@ -176,6 +313,7 @@ def main() -> int:
         task_count=len(result_files),
         passed_count=passed,
         failed_count=failed,
+        llm_calls_total=llm_calls_total,
         duration_seconds=float(args.duration_seconds) if args.duration_seconds is not None else parse_duration,
         output_path=str(run_dir.resolve()),
     )
@@ -190,6 +328,8 @@ def main() -> int:
 
     write_json(Path(args.out_json), summary_obj)
     write_csv(Path(args.out_csv), summary)
+    if args.out_task_csv:
+        write_task_rows(Path(args.out_task_csv), task_rows)
 
     return 0
 

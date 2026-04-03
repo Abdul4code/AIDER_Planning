@@ -216,6 +216,29 @@ echo "Ollama (container): $container_ollama_base"
 echo "Live logs: benchmark/runs/$run_name/run.log"
 echo "Error logs: benchmark/runs/$run_name/run.err.log"
 
+# Stream per-task results while benchmark is still running.
+summary_json="Baseline/results/${run_name}.json"
+summary_csv="Baseline/results/${run_name}.csv"
+task_csv="Baseline/results/${run_name}.tasks.csv"
+collect_stop_file="$run_dir/.collect.stop"
+rm -f "$collect_stop_file"
+
+"$PY" Baseline/scripts/collect_results.py \
+  --run-name "$run_name" \
+  --run-dir "$run_dir/tmp.benchmarks" \
+  --model "$model_arg" \
+  --out-json "$summary_json" \
+  --out-csv "$summary_csv" \
+  --out-task-csv "$task_csv" \
+  --stream-task-csv \
+  --poll-interval 2 \
+  --stop-file "$collect_stop_file" \
+  1>"$run_dir/collect_stream.log" \
+  2>"$run_dir/collect_stream.err.log" &
+collect_pid=$!
+
+echo "Per-task CSV (live): $task_csv"
+
 bench_start_epoch="$(date +%s)"
 
 set +e
@@ -235,6 +258,9 @@ docker run --rm \
 docker_rc=$?
 set -e
 
+touch "$collect_stop_file"
+wait "$collect_pid" >/dev/null 2>&1 || true
+
 if [[ "$docker_rc" -ne 0 ]]; then
     echo "ERROR: Benchmark run failed. See logs:" >&2
     echo "- $run_dir/run.log" >&2
@@ -248,9 +274,6 @@ bench_duration_seconds="$((bench_end_epoch - bench_start_epoch))"
 echo "OK: Benchmark run completed. Logs at $run_dir"
 
 # --- Collect summary ---
-summary_json="Baseline/results/${run_name}.json"
-summary_csv="Baseline/results/${run_name}.csv"
-
 "$PY" Baseline/scripts/collect_results.py \
   --run-name "$run_name" \
   --run-dir "$run_dir/tmp.benchmarks" \
@@ -259,10 +282,11 @@ summary_csv="Baseline/results/${run_name}.csv"
   --duration-seconds "$bench_duration_seconds" \
   --out-json "$summary_json" \
   --out-csv "$summary_csv" \
+  --out-task-csv "$task_csv" \
   1>"$run_dir/collect.log" \
   2>"$run_dir/collect.err.log" || {
     echo "ERROR: Result collection failed. See $run_dir/collect.err.log" >&2
     exit 6
   }
 
-echo "OK: Summary written: $summary_json and $summary_csv"
+echo "OK: Summary written: $summary_json, $summary_csv, and $task_csv"
