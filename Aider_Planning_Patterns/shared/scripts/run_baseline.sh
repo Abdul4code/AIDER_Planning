@@ -74,6 +74,19 @@ run_dir="benchmark/runs/${run_name}"
 mkdir -p "$run_dir"
 mkdir -p "$run_dir/tmp.benchmarks"
 
+# --- Normalize exercises layout for old code-editing mode ---
+# Current benchmark.py expects: <base>/<language>/exercises/practice/*
+# Old Exercism Python repo layout is: <base>/exercises/practice/*
+# Build a shim so both layouts work with the same harness.
+EXERCISES_MOUNT_SRC="$POLYGLOT_DIR"
+if [[ -d "$POLYGLOT_DIR/exercises/practice" && ! -d "$POLYGLOT_DIR/python/exercises/practice" ]]; then
+  shim_dir="$run_dir/exercises-shim"
+  mkdir -p "$shim_dir/python"
+  rm -rf "$shim_dir/python/exercises"
+  cp -R "$POLYGLOT_DIR/exercises" "$shim_dir/python/exercises"
+  EXERCISES_MOUNT_SRC="$shim_dir"
+fi
+
 # Symlink the harness' expected tmp.benchmarks location to our run dir for reproducibility.
 # (Upstream scripts commonly use ./tmp.benchmarks relative to the aider repo.)
 if [[ -e "$AIDER_DIR/tmp.benchmarks" || -L "$AIDER_DIR/tmp.benchmarks" ]]; then
@@ -110,21 +123,102 @@ exercises_dir="$AIDER_BENCH_EXERCISES_SUBDIR"
 
 # TODO: If upstream benchmark CLI changes, update this command.
 bench_cmd=(
-  python benchmark/benchmark.py "$run_name"
+  benchmark/benchmark.py "$run_name"
   --model "$model_arg"
   --edit-format "$AIDER_BENCH_EDIT_FORMAT"
   --threads "$AIDER_BENCH_THREADS"
   --exercises-dir "$exercises_dir"
 )
 
+# Optional benchmark controls (from .env), passed through when set.
+if [[ -n "${AIDER_BENCH_TRIES:-}" ]]; then
+  bench_cmd+=(--tries "$AIDER_BENCH_TRIES")
+fi
+if [[ -n "${AIDER_BENCH_LANGUAGES:-}" ]]; then
+  bench_cmd+=(--languages "$AIDER_BENCH_LANGUAGES")
+fi
+if [[ -n "${AIDER_BENCH_KEYWORDS:-}" ]]; then
+  bench_cmd+=(--keywords "$AIDER_BENCH_KEYWORDS")
+fi
+if [[ -n "${AIDER_BENCH_NUM_TESTS:-}" ]]; then
+  bench_cmd+=(--num-tests "$AIDER_BENCH_NUM_TESTS")
+fi
+if [[ -n "${AIDER_BENCH_NUM_CTX:-}" ]]; then
+  bench_cmd+=(--num-ctx "$AIDER_BENCH_NUM_CTX")
+fi
+
+# Compute how many tasks are planned using the same filters as benchmark.py.
+planned_total="$($PY - <<PY
+import os
+from pathlib import Path
+
+polyglot_dir = Path("$EXERCISES_MOUNT_SRC")
+languages = os.environ.get("AIDER_BENCH_LANGUAGES", "").strip()
+keywords = os.environ.get("AIDER_BENCH_KEYWORDS", "").strip()
+num_tests_raw = os.environ.get("AIDER_BENCH_NUM_TESTS", "").strip()
+
+lang_filter = set()
+if languages:
+  lang_filter = {lang.strip().lower() for lang in languages.split(",") if lang.strip()}
+
+keyword_filter = []
+if keywords:
+  keyword_filter = [k.strip() for k in keywords.split(",") if k.strip()]
+
+num_tests = -1
+if num_tests_raw:
+  try:
+    num_tests = int(num_tests_raw)
+  except ValueError:
+    num_tests = -1
+
+test_paths = []
+if polyglot_dir.exists() and polyglot_dir.is_dir():
+  for lang_dir in polyglot_dir.iterdir():
+    if not lang_dir.is_dir():
+      continue
+    if lang_filter and lang_dir.name.lower() not in lang_filter:
+      continue
+
+    practice = lang_dir / "exercises" / "practice"
+    if not practice.exists():
+      continue
+
+    for ex_dir in practice.iterdir():
+      if not ex_dir.is_dir():
+        continue
+      rel = str(ex_dir.relative_to(polyglot_dir))
+      if keyword_filter and not any(k in rel for k in keyword_filter):
+        continue
+      test_paths.append(rel)
+
+total = len(test_paths)
+if num_tests > 0:
+  total = min(total, num_tests)
+
+print(total)
+PY
+)"
+
 echo "== Running benchmark =="
 echo "Run: $run_name"
 echo "Model: $model_arg"
+echo "Planned tasks: $planned_total"
+echo "Threads: $AIDER_BENCH_THREADS"
+if [[ -n "${AIDER_BENCH_TRIES:-}" ]]; then
+  echo "Tries per task: $AIDER_BENCH_TRIES"
+fi
+if [[ -n "${AIDER_BENCH_NUM_CTX:-}" ]]; then
+  echo "Context window override (--num-ctx): $AIDER_BENCH_NUM_CTX"
+fi
 echo "Ollama (host):      $host_ollama_base"
 echo "Ollama (container): $container_ollama_base"
+echo "Live logs: benchmark/runs/$run_name/run.log"
+echo "Error logs: benchmark/runs/$run_name/run.err.log"
 
 bench_start_epoch="$(date +%s)"
 
+set +e
 docker run --rm \
   --add-host host.docker.internal:host-gateway \
   -e AIDER_DOCKER=1 \
@@ -132,17 +226,21 @@ docker run --rm \
   -e OLLAMA_API_BASE="$container_ollama_base" \
   -v "$(cd "$AIDER_DIR" && pwd)":/aider \
   -v "$(cd "$run_dir/tmp.benchmarks" && pwd)":/benchmarks \
-  -v "$(cd "$POLYGLOT_DIR" && pwd)":/benchmarks/polyglot-benchmark \
+  -v "$(cd "$EXERCISES_MOUNT_SRC" && pwd)":/benchmarks/polyglot-benchmark \
   -w /aider \
   "$AIDER_BENCH_DOCKER_IMAGE" \
-  bash -lc "pip install -e .[dev] >/dev/null && ${bench_cmd[*]}" \
-  1>"$run_dir/run.log" \
-  2>"$run_dir/run.err.log" || {
+  bash -lc "pip install -e .[dev] >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" ${bench_cmd[*]}" \
+  > >(tee "$run_dir/run.log") \
+  2> >(tee "$run_dir/run.err.log" >&2)
+docker_rc=$?
+set -e
+
+if [[ "$docker_rc" -ne 0 ]]; then
     echo "ERROR: Benchmark run failed. See logs:" >&2
     echo "- $run_dir/run.log" >&2
     echo "- $run_dir/run.err.log" >&2
     exit 5
-  }
+fi
 
 bench_end_epoch="$(date +%s)"
 bench_duration_seconds="$((bench_end_epoch - bench_start_epoch))"

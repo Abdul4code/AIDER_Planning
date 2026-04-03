@@ -12,10 +12,10 @@ myEnv/
 
 # --- Local configuration ---
 .env
-.env.*
 
 # --- Experiment artifacts (generated) ---
 benchmark/runs/
+Aider_Planning_Patterns/benchmark/runs/
 benchmark/repos/
 Baseline/results/
 
