@@ -36,6 +36,8 @@ class RunSummary:
     passed_count: int
     failed_count: int
     llm_calls_total: int
+    codecarbon_energy_kwh_total: float
+    codecarbon_emissions_kg_total: float
     duration_seconds: float
     output_path: str
 
@@ -160,6 +162,8 @@ def _task_row(run_dir: Path, result_path: Path, raw: Dict[str, Any], passed: boo
         "num_malformed_responses": raw.get("num_malformed_responses", ""),
         "num_exhausted_context_windows": raw.get("num_exhausted_context_windows", ""),
         "test_timeouts": raw.get("test_timeouts", ""),
+        "codecarbon_energy_kwh": raw.get("codecarbon_energy_kwh", ""),
+        "codecarbon_emissions_kg": raw.get("codecarbon_emissions_kg", ""),
     }
 
 
@@ -180,6 +184,8 @@ def write_task_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
         "num_malformed_responses",
         "num_exhausted_context_windows",
         "test_timeouts",
+        "codecarbon_energy_kwh",
+        "codecarbon_emissions_kg",
     ]
 
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -206,6 +212,8 @@ def append_task_row(path: Path, row: Dict[str, Any]) -> None:
         "num_malformed_responses",
         "num_exhausted_context_windows",
         "test_timeouts",
+        "codecarbon_energy_kwh",
+        "codecarbon_emissions_kg",
     ]
     is_new = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as f:
@@ -277,6 +285,8 @@ def main() -> int:
     passed = 0
     failed = 0
     llm_calls_total = 0
+    codecarbon_energy_kwh_total = 0.0
+    codecarbon_emissions_kg_total = 0.0
     per_task: List[Dict[str, Any]] = []
     task_rows: List[Dict[str, Any]] = []
 
@@ -291,6 +301,18 @@ def main() -> int:
             chat_hashes = raw.get("chat_hashes")
             if isinstance(chat_hashes, list):
                 llm_calls_total += len(chat_hashes)
+            try:
+                energy = raw.get("codecarbon_energy_kwh")
+                if energy is not None:
+                    codecarbon_energy_kwh_total += float(energy)
+            except Exception:
+                pass
+            try:
+                emissions = raw.get("codecarbon_emissions_kg")
+                if emissions is not None:
+                    codecarbon_emissions_kg_total += float(emissions)
+            except Exception:
+                pass
 
         per_task.append(
             {
@@ -314,6 +336,8 @@ def main() -> int:
         passed_count=passed,
         failed_count=failed,
         llm_calls_total=llm_calls_total,
+        codecarbon_energy_kwh_total=codecarbon_energy_kwh_total,
+        codecarbon_emissions_kg_total=codecarbon_emissions_kg_total,
         duration_seconds=float(args.duration_seconds) if args.duration_seconds is not None else parse_duration,
         output_path=str(run_dir.resolve()),
     )

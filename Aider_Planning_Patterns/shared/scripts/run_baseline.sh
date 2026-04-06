@@ -252,7 +252,7 @@ docker run --rm \
   -v "$(cd "$EXERCISES_MOUNT_SRC" && pwd)":/benchmarks/polyglot-benchmark \
   -w /aider \
   "$AIDER_BENCH_DOCKER_IMAGE" \
-  bash -lc "pip install -e .[dev] >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" ${bench_cmd[*]}" \
+  bash -lc "pip install -e .[dev] codecarbon >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" ${bench_cmd[*]}" \
   > >(tee "$run_dir/run.log") \
   2> >(tee "$run_dir/run.err.log" >&2)
 docker_rc=$?
