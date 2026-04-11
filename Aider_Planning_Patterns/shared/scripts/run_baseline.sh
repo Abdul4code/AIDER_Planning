@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Runs the Aider benchmark baseline using Ollama locally.
-# This uses Docker because the Aider benchmark harness is designed to run in Docker.
+# Runs the baseline benchmark variant using a sidecar harness.
+# This keeps upstream Aider benchmark code unmodified.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck disable=SC1091
@@ -55,20 +55,27 @@ fi
 # --- Validate benchmark repos present ---
 AIDER_DIR="benchmark/repos/aider"
 POLYGLOT_DIR="benchmark/repos/polyglot-benchmark"
+HARNESS_SCRIPT="Baseline/scripts/baseline_harness.py"
 
-if [[ ! -f "$AIDER_DIR/benchmark/benchmark.py" ]]; then
-  echo "ERROR: Aider benchmark harness missing. Run: bash shared/scripts/setup_benchmark.sh" >&2
+if [[ ! -f "$AIDER_DIR/benchmark/Dockerfile" ]]; then
+  echo "ERROR: Aider benchmark repo missing Dockerfile. Run: bash shared/scripts/setup_benchmark.sh" >&2
   exit 4
 fi
 if [[ ! -d "$POLYGLOT_DIR" ]]; then
   echo "ERROR: polyglot-benchmark missing. Run: bash shared/scripts/setup_benchmark.sh" >&2
   exit 4
 fi
+if [[ ! -f "$HARNESS_SCRIPT" ]]; then
+  echo "ERROR: baseline harness missing: $HARNESS_SCRIPT" >&2
+  exit 4
+fi
 
 # --- Prepare run directory ---
 ts="$(now_timestamp)"
 model_safe="$(sanitize_for_path "$OLLAMA_MODEL")"
-run_name="${ts}--baseline--${model_safe}"
+run_variant_name="${AIDER_RUN_VARIANT_NAME:-baseline}"
+results_dir="${AIDER_RESULTS_DIR:-Baseline/results}"
+run_name="${ts}--${run_variant_name}--${model_safe}"
 run_dir="benchmark/runs/${run_name}"
 
 mkdir -p "$run_dir"
@@ -121,30 +128,29 @@ model_arg="${AIDER_BENCH_MODEL_PREFIX}${OLLAMA_MODEL}"
 # We mount the polyglot repo under /benchmarks/polyglot-benchmark
 exercises_dir="$AIDER_BENCH_EXERCISES_SUBDIR"
 
-# TODO: If upstream benchmark CLI changes, update this command.
-bench_cmd=(
-  benchmark/benchmark.py "$run_name"
+harness_cmd=(
+  /workspace/Baseline/scripts/baseline_harness.py
+  --run-name "$run_name"
   --model "$model_arg"
   --edit-format "$AIDER_BENCH_EDIT_FORMAT"
   --threads "$AIDER_BENCH_THREADS"
   --exercises-dir "$exercises_dir"
+  --tries "${AIDER_BENCH_TRIES:-2}"
+  --shuffle-tasks "${AIDER_BENCH_SHUFFLE_TASKS:-1}"
 )
 
 # Optional benchmark controls (from .env), passed through when set.
-if [[ -n "${AIDER_BENCH_TRIES:-}" ]]; then
-  bench_cmd+=(--tries "$AIDER_BENCH_TRIES")
-fi
 if [[ -n "${AIDER_BENCH_LANGUAGES:-}" ]]; then
-  bench_cmd+=(--languages "$AIDER_BENCH_LANGUAGES")
+  harness_cmd+=(--languages "$AIDER_BENCH_LANGUAGES")
 fi
 if [[ -n "${AIDER_BENCH_KEYWORDS:-}" ]]; then
-  bench_cmd+=(--keywords "$AIDER_BENCH_KEYWORDS")
+  harness_cmd+=(--keywords "$AIDER_BENCH_KEYWORDS")
 fi
 if [[ -n "${AIDER_BENCH_NUM_TESTS:-}" ]]; then
-  bench_cmd+=(--num-tests "$AIDER_BENCH_NUM_TESTS")
+  harness_cmd+=(--num-tests "$AIDER_BENCH_NUM_TESTS")
 fi
 if [[ -n "${AIDER_BENCH_NUM_CTX:-}" ]]; then
-  bench_cmd+=(--num-ctx "$AIDER_BENCH_NUM_CTX")
+  harness_cmd+=(--num-ctx "$AIDER_BENCH_NUM_CTX")
 fi
 
 # Compute how many tasks are planned using the same filters as benchmark.py.
@@ -202,14 +208,17 @@ PY
 
 echo "== Running benchmark =="
 echo "Run: $run_name"
+echo "Variant: $run_variant_name"
 echo "Model: $model_arg"
 echo "Planned tasks: $planned_total"
 echo "Threads: $AIDER_BENCH_THREADS"
-if [[ -n "${AIDER_BENCH_TRIES:-}" ]]; then
-  echo "Tries per task: $AIDER_BENCH_TRIES"
-fi
+echo "Tries per task: ${AIDER_BENCH_TRIES:-2}"
+echo "Shuffle tasks: ${AIDER_BENCH_SHUFFLE_TASKS:-1}"
 if [[ -n "${AIDER_BENCH_NUM_CTX:-}" ]]; then
   echo "Context window override (--num-ctx): $AIDER_BENCH_NUM_CTX"
+fi
+if [[ -n "${AIDER_BENCH_LLM_TIMEOUT:-}" ]]; then
+  echo "LLM API timeout override: ${AIDER_BENCH_LLM_TIMEOUT}s"
 fi
 echo "Ollama (host):      $host_ollama_base"
 echo "Ollama (container): $container_ollama_base"
@@ -217,9 +226,9 @@ echo "Live logs: benchmark/runs/$run_name/run.log"
 echo "Error logs: benchmark/runs/$run_name/run.err.log"
 
 # Stream per-task results while benchmark is still running.
-summary_json="Baseline/results/${run_name}.json"
-summary_csv="Baseline/results/${run_name}.csv"
-task_csv="Baseline/results/${run_name}.tasks.csv"
+summary_json="${results_dir}/${run_name}.json"
+summary_csv="${results_dir}/${run_name}.csv"
+task_csv="${results_dir}/${run_name}.tasks.csv"
 collect_stop_file="$run_dir/.collect.stop"
 rm -f "$collect_stop_file"
 
@@ -246,13 +255,17 @@ docker run --rm \
   --add-host host.docker.internal:host-gateway \
   -e AIDER_DOCKER=1 \
   -e AIDER_BENCHMARK_DIR=/benchmarks \
+  -e AIDER_BENCH_EXTRA_INSTRUCTIONS="${AIDER_BENCH_EXTRA_INSTRUCTIONS:-}" \
+  -e AIDER_BENCH_RETRY_TIMEOUT="${AIDER_BENCH_RETRY_TIMEOUT:-}" \
+  -e AIDER_BENCH_LLM_TIMEOUT="${AIDER_BENCH_LLM_TIMEOUT:-}" \
   -e OLLAMA_API_BASE="$container_ollama_base" \
+  -v "$(cd "$ROOT_DIR" && pwd)":/workspace \
   -v "$(cd "$AIDER_DIR" && pwd)":/aider \
   -v "$(cd "$run_dir/tmp.benchmarks" && pwd)":/benchmarks \
   -v "$(cd "$EXERCISES_MOUNT_SRC" && pwd)":/benchmarks/polyglot-benchmark \
   -w /aider \
   "$AIDER_BENCH_DOCKER_IMAGE" \
-  bash -lc "pip install -e .[dev] codecarbon >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" ${bench_cmd[*]}" \
+  bash -lc "pip install -e .[dev] codecarbon >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" ${harness_cmd[*]}" \
   > >(tee "$run_dir/run.log") \
   2> >(tee "$run_dir/run.err.log" >&2)
 docker_rc=$?

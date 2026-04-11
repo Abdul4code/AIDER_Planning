@@ -85,9 +85,15 @@ What it does:
 2. Validates Ollama connectivity
 3. Validates benchmark repos are present
 4. Creates a timestamped run directory under `benchmark/runs/`
-5. Runs the Aider benchmark in Docker (using Ollama)
+5. Runs the Baseline sidecar harness in Docker (using Ollama + upstream Aider package)
 6. Captures stdout/stderr logs
 7. Writes a summary to `Baseline/results/`
+
+For deterministic (non-shuffled) task order:
+
+```bash
+AIDER_BENCH_SHUFFLE_TASKS=0 bash shared/scripts/run_baseline.sh
+```
 
 ## Logs & results
 
@@ -98,8 +104,9 @@ What it does:
 
 ## Notes / TODOs
 
-- The benchmark harness lives in the cloned `benchmark/repos/aider/benchmark/` directory.
-- If upstream Aider changes its benchmark CLI or output format, update:
-  - `shared/scripts/run_baseline.sh`
+- Baseline and Decomposition both use sidecar harnesses in this repo and avoid patching upstream Aider.
+- If upstream Aider internals change substantially, update:
+  - `Baseline/scripts/baseline_harness.py`
+  - `Decomposition/scripts/decomposition_harness.py`
   - `Baseline/scripts/collect_results.py`
 

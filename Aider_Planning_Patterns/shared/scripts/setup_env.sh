@@ -14,8 +14,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
-if [[ ! -d ".venv" ]]; then
+if [[ ! -x ".venv/bin/python" ]]; then
   echo "Creating venv at .venv/"
+  rm -rf .venv
   python3 -m venv .venv
 fi
 

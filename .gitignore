@@ -19,6 +19,7 @@ Aider_Planning_Patterns/benchmark/runs/
 benchmark/repos/
 Baseline/results/
 Aider_Planning_Patterns/Baseline/results/
+Aider_Planning_Patterns/Decomposition/results/
 
 # Aider-generated local artifacts (if you run Aider in this repo)
 .aider*
