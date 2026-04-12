@@ -49,14 +49,30 @@ AIDER_BENCH_SHUFFLE_TASKS=0 bash shared/scripts/run_decomposition.sh
 - Writes summaries to `Decomposition/results/`.
 - Runs interleaved planner and executor calls per task with max cycles from `AIDER_BENCH_ARCH_MAX_STEPS` (default `3`).
 - Uses strict interleaved behavior: if the planner does not produce 1-2 actionable sub-steps, the cycle ends instead of falling back to broad execution.
-- Adds one strict replan attempt when planner output is too generic/non-actionable.
+- Gives the planner access to the same open solution files as the executor so sub-goals are grounded in the actual codebase.
+- Keeps replan repair disabled by default for paper-faithful interleaving; enable it with `AIDER_BENCH_DECOMP_REPAIR=1` if needed.
 - Compresses test-failure feedback to a short summary before the next attempt to prevent prompt bloat.
-- Stops early after repeated no-op executor actions to avoid wasted cycles.
+- Stops early after repeated no-op executor actions, with the threshold configurable via `AIDER_BENCH_DECOMP_NOOP_STOP_THRESHOLD` (default `3`).
 - Supports deterministic task order with `AIDER_BENCH_SHUFFLE_TASKS=0`.
+- Enforces a hard per-task timeout cap of 900 seconds (15 minutes), even if a larger timeout is configured.
+- Enforces baseline accuracy parity by default after each run (`AIDER_BENCH_REQUIRE_BASELINE_PARITY=1`).
 - Injects decomposition guidance into task instructions:
   - reveal only next sub-goal(s)
   - create immediate sub-plan (1-2 actions)
   - execute, reassess, and continue
+
+## Accuracy Parity Gate
+
+By default, decomposition runs fail if accuracy is below baseline.
+
+- Overall gate: decomposition pass-rate must be >= baseline pass-rate.
+- Matched-task gate: when both task CSV files are available, decomposition matched-task pass-rate must be >= baseline on overlapping task keys.
+- Optional strict gate: set `AIDER_BENCH_REQUIRE_PER_TASK_PARITY=1` to fail on any individual task where baseline passed and decomposition failed.
+
+Override baseline source files if needed:
+
+- `AIDER_BENCH_BASELINE_SUMMARY_JSON=/path/to/baseline-summary.json`
+- `AIDER_BENCH_BASELINE_TASK_CSV=/path/to/baseline.tasks.csv`
 
 ## Architectural Metrics
 

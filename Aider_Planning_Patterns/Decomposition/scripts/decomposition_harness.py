@@ -29,6 +29,8 @@ from aider import models, sendchat
 from aider.coders import Coder, base_coder
 from aider.io import InputOutput
 
+MAX_TASK_TIMEOUT_SECONDS = 15 * 60
+
 INSTRUCTIONS_ADDENDUM = """
 ####
 
@@ -45,10 +47,31 @@ The tests are correct, don't try and change them.
 Fix the code in {file_list} to resolve the errors.
 """
 
+
+def _seconds_left(deadline_ts: Optional[float]) -> Optional[int]:
+    if deadline_ts is None:
+        return None
+    return int(deadline_ts - datetime.datetime.now().timestamp())
+
+
+def _effective_call_timeout(remaining_seconds: Optional[int], llm_timeout: Optional[int]) -> Optional[int]:
+    if remaining_seconds is not None:
+        if remaining_seconds <= 0:
+            return None
+        if llm_timeout and llm_timeout > 0:
+            return max(1, min(remaining_seconds, llm_timeout))
+        return max(1, remaining_seconds)
+    return llm_timeout
+
 GENERIC_ACTION_PATTERNS = [
     r"^\s*(review|understand|analy[sz]e|inspect|consider|explore)\b",
     r"^\s*(identify|determine)\b.*\b(requirements|problem|issue|steps?)\b",
-    r"^\s*(write|create)\b.*\btest\b",
+]
+
+NON_CODE_ACTION_PATTERNS = [
+    r"\b(run|execute)\b.*\b(test|pytest|unittest|spec)\b",
+    r"\b(create|add|write|update|modify)\b.*\btest(s| cases?)?\b",
+    r"\btest\s+the\b",
 ]
 
 
@@ -169,8 +192,16 @@ def _is_actionable_instruction(text: str) -> bool:
     if len(t.split()) < 4:
         return False
     lowered = t.lower()
-    for pattern in GENERIC_ACTION_PATTERNS:
+    for pattern in NON_CODE_ACTION_PATTERNS:
         if re.search(pattern, lowered):
+            return False
+
+    has_code_cue = any(
+        cue in lowered
+        for cue in [".py", ".rs", ".go", ".js", ".cpp", ".java", "function", "class", "method", "symbol", "file", "return", "input", "output"]
+    ) or "`" in t
+    for pattern in GENERIC_ACTION_PATTERNS:
+        if re.search(pattern, lowered) and not has_code_cue:
             return False
     return True
 
@@ -219,13 +250,97 @@ def _snapshot_files(paths: list[Path]) -> dict[str, str]:
     return snap
 
 
+def _restore_protected_files(
+    original_exercise_dir: Path,
+    testdir: Path,
+    protected_files: list[str],
+) -> list[str]:
+    restored: list[str] = []
+    for rel in protected_files:
+        src = original_exercise_dir / rel
+        dst = testdir / rel
+        if not src.exists() or not src.is_file():
+            continue
+
+        if dst.exists() and dst.is_file() and _file_sha256(src) == _file_sha256(dst):
+            continue
+
+        os.makedirs(dst.parent, exist_ok=True)
+        shutil.copy(src, dst)
+        restored.append(rel)
+    return restored
+
+
+ENFORCED_CODE_FILE_EXTS = {
+    ".py", ".rs", ".go", ".js", ".jsx", ".ts", ".tsx", ".cpp", ".cc", ".c", ".h", ".hpp", ".java"
+}
+
+
+def _enforce_solution_only_writes(
+    original_exercise_dir: Path,
+    testdir: Path,
+    allowed_solution_files: set[str],
+) -> list[str]:
+    reverted: list[str] = []
+
+    for dst in testdir.rglob("*"):
+        if not dst.is_file():
+            continue
+
+        rel = str(dst.relative_to(testdir))
+        if rel.startswith(".aider."):
+            continue
+        if Path(rel).suffix.lower() not in ENFORCED_CODE_FILE_EXTS:
+            continue
+        if rel in allowed_solution_files:
+            continue
+
+        src = original_exercise_dir / rel
+        if src.exists() and src.is_file():
+            if _file_sha256(src) != _file_sha256(dst):
+                os.makedirs(dst.parent, exist_ok=True)
+                shutil.copy(src, dst)
+                reverted.append(rel)
+        else:
+            dst.unlink(missing_ok=True)
+            reverted.append(rel)
+
+    for src in original_exercise_dir.rglob("*"):
+        if not src.is_file():
+            continue
+
+        rel = str(src.relative_to(original_exercise_dir))
+        if rel.startswith(".aider."):
+            continue
+        if Path(rel).suffix.lower() not in ENFORCED_CODE_FILE_EXTS:
+            continue
+        if rel in allowed_solution_files:
+            continue
+
+        dst = testdir / rel
+        if not dst.exists():
+            os.makedirs(dst.parent, exist_ok=True)
+            shutil.copy(src, dst)
+            reverted.append(rel)
+
+    return sorted(set(reverted))
+
+
 def cleanup_test_output(output: str, testdir: Path) -> str:
     res = re.sub(r"\bin \d+\.\d+s\b", "", output)
     return res.replace(str(testdir), str(testdir.name))
 
 
-def run_unit_tests(original_exercise_dir: Path, testdir: Path, history_fname: Path, test_files: list[str]) -> Optional[str]:
+def run_unit_tests(
+    original_exercise_dir: Path,
+    testdir: Path,
+    history_fname: Path,
+    test_files: list[str],
+    timeout_seconds: Optional[int] = None,
+) -> Optional[str]:
     timeout = 60 * 3
+    if timeout_seconds is not None and timeout_seconds > 0:
+        timeout = min(timeout, timeout_seconds)
 
     test_commands = {
         ".py": ["pytest"],
@@ -348,6 +463,7 @@ def run_single_task(
     arch_max_steps: int,
     commit_hash: str,
     llm_timeout: Optional[int],
+    task_timeout_seconds: Optional[int],
 ) -> dict[str, Any]:
     tracker = None
     task_emissions_kg = None
@@ -369,6 +485,7 @@ def run_single_task(
     test_files = config.get("files", {}).get("test", [])
     example_files = config.get("files", {}).get("example", [])
     solution_files = set(config.get("files", {}).get("solution", []))
+    protected_files = sorted(set(test_files + example_files))
 
     ignore_files = {"CMakeLists.txt", "Cargo.toml"}
     ignore_files.update(str(p.relative_to(testdir)) for p in testdir.glob(".meta/**/*") if p.is_file())
@@ -382,6 +499,7 @@ def run_single_task(
         src = testdir / file_path
         if src.exists() and src.is_file():
             fnames.append(src)
+    allowed_solution_relpaths = {str(p.relative_to(testdir)) for p in fnames}
 
     file_list = " ".join(fname.name for fname in fnames)
 
@@ -399,6 +517,8 @@ def run_single_task(
         instructions += f"\n\n####\n\n{extra_planning_instructions}\n"
 
     io = InputOutput(pretty=False, yes=True, chat_history_file=history_fname)
+    planner_history_fname = testdir / ".aider.planner.history.md"
+    planner_io = InputOutput(pretty=False, yes=True, chat_history_file=planner_history_fname)
     main_model = models.Model(model_name, weak_model=None, editor_model=None, editor_edit_format=None, verbose=False)
 
     if num_ctx:
@@ -410,6 +530,9 @@ def run_single_task(
         main_model.timeout = llm_timeout
 
     actual_edit_format = edit_format or main_model.edit_format
+    # IMPORTANT: Only pass solution files to coders, never test/example files.
+    # This prevents model confusion about which files are editable.
+    # Test files are only used for validation, not given to the model.
     coder = Coder.create(
         main_model,
         actual_edit_format,
@@ -427,8 +550,8 @@ def run_single_task(
     planner_coder = Coder.create(
         main_model,
         "ask",
-        io,
-        fnames=[],
+        planner_io,
+        fnames=fnames,
         use_git=False,
         stream=False,
         verbose=False,
@@ -446,26 +569,47 @@ def run_single_task(
     executor_calls = 0
     arch_plan_steps = 0
     arch_interleaved_cycles = 0
+    noop_stop_threshold = int(os.environ.get("AIDER_BENCH_DECOMP_NOOP_STOP_THRESHOLD", "3"))
+    enable_repair = _env_flag("AIDER_BENCH_DECOMP_REPAIR", False)
 
     duration = 0.0
     test_outcomes: list[bool] = []
     current_instructions = instructions
+    task_timed_out = False
+    task_deadline_ts: Optional[float] = None
+    if task_timeout_seconds and task_timeout_seconds > 0:
+        task_deadline_ts = datetime.datetime.now().timestamp() + task_timeout_seconds
 
     for _ in range(tries):
+        remaining_seconds = _seconds_left(task_deadline_ts)
+        if remaining_seconds is not None and remaining_seconds <= 0:
+            task_timed_out = True
+            break
+
         start = datetime.datetime.now().timestamp()
         responses: list[str] = []
         interleaved_memory: list[str] = []
         no_op_action_streak = 0
 
         for cycle in range(1, arch_max_steps + 1):
+            remaining_seconds = _seconds_left(task_deadline_ts)
+            if remaining_seconds is not None and remaining_seconds <= 0:
+                task_timed_out = True
+                break
+
+            call_timeout = _effective_call_timeout(remaining_seconds, llm_timeout)
+            if call_timeout is None:
+                task_timed_out = True
+                break
+            main_model.timeout = call_timeout
+
             arch_interleaved_cycles += 1
             planner_prompt = current_instructions + "\n\n####\n\n"
             planner_prompt += (
-                "Interleaved decomposition mode. Based on current progress, reveal only the next "
-                'sub-goal(s) and immediate sub-plan actions. Return JSON with this exact schema: '
+                "Interleaved decomposition mode. Reveal only the next sub-goal and exactly one "
+                'immediate code-edit action. Return JSON with this exact schema: '
                 '{"sub_goal": "...", "sub_plan": [{"instruction": "..."}], "continue": true}. '
-                "Use 1-2 actions in sub_plan. Do not include markdown fences. "
-                "Do not modify files in this planning call."
+                "Do not include markdown fences. Do not modify files in this planning call."
             )
             if interleaved_memory:
                 planner_prompt += "\n\nProgress so far:\n" + "\n".join(interleaved_memory[-8:])
@@ -474,10 +618,10 @@ def run_single_task(
             planner_calls += 1
             responses.append(planner_response)
 
-            sub_goal, cycle_actions, should_continue = _extract_interleaved_step(planner_response, max_actions=2)
-            cycle_actions = _filter_actionable_actions(cycle_actions, max_actions=2)
+            sub_goal, cycle_actions, should_continue = _extract_interleaved_step(planner_response, max_actions=1)
+            cycle_actions = _filter_actionable_actions(cycle_actions, max_actions=1)
 
-            if not cycle_actions and should_continue:
+            if not cycle_actions and should_continue and enable_repair:
                 # One strict replan attempt when planner output is too generic/non-actionable.
                 repair_prompt = planner_prompt + "\n\nYour previous sub-plan was not actionable. " \
                     "Return only concrete code-edit actions tied to specific symbols/files."
@@ -485,9 +629,9 @@ def run_single_task(
                 planner_calls += 1
                 responses.append(planner_response)
                 sub_goal, cycle_actions, should_continue = _extract_interleaved_step(
-                    planner_response, max_actions=2
+                    planner_response, max_actions=1
                 )
-                cycle_actions = _filter_actionable_actions(cycle_actions, max_actions=2)
+                cycle_actions = _filter_actionable_actions(cycle_actions, max_actions=1)
 
             arch_plan_steps += len(cycle_actions)
 
@@ -497,18 +641,48 @@ def run_single_task(
                 break
 
             for action_idx, action_instruction in enumerate(cycle_actions, start=1):
+                remaining_seconds = _seconds_left(task_deadline_ts)
+                if remaining_seconds is not None and remaining_seconds <= 0:
+                    task_timed_out = True
+                    should_continue = False
+                    break
+
+                call_timeout = _effective_call_timeout(remaining_seconds, llm_timeout)
+                if call_timeout is None:
+                    task_timed_out = True
+                    should_continue = False
+                    break
+                main_model.timeout = call_timeout
+
                 before_snap = _snapshot_files(fnames)
                 step_message = (
                     f"Interleaved cycle {cycle}/{arch_max_steps}.\\n"
                     f"Current sub-goal: {sub_goal or 'N/A'}\\n"
                     f"Sub-plan action {action_idx}/{len(cycle_actions)}: {action_instruction}\\n\\n"
                     "Apply code edits only for this action. Keep changes minimal and aligned with "
-                    "exercise requirements and test contract."
+                    "exercise requirements and test contract. Do not create new files. "
+                    "Do not edit tests, examples, metadata, or docs files."
                 )
                 step_response = coder.run(with_message=step_message, preproc=False)
                 executor_calls += 1
                 responses.append(step_response)
                 interleaved_memory.append(f"cycle {cycle} action {action_idx}: {action_instruction}")
+
+                restored = _restore_protected_files(original_exercise_dir, testdir, protected_files)
+                if restored:
+                    interleaved_memory.append(
+                        f"cycle {cycle} action {action_idx}: restored protected files ({', '.join(restored[:3])})"
+                    )
+
+                reverted_non_solution = _enforce_solution_only_writes(
+                    original_exercise_dir,
+                    testdir,
+                    allowed_solution_relpaths,
+                )
+                if reverted_non_solution:
+                    interleaved_memory.append(
+                        f"cycle {cycle} action {action_idx}: reverted non-solution edits ({', '.join(reverted_non_solution[:3])})"
+                    )
 
                 after_snap = _snapshot_files(fnames)
                 if before_snap == after_snap:
@@ -516,7 +690,7 @@ def run_single_task(
                 else:
                     no_op_action_streak = 0
 
-                if no_op_action_streak >= 2:
+                if noop_stop_threshold > 0 and no_op_action_streak >= noop_stop_threshold:
                     interleaved_memory.append(
                         f"cycle {cycle}: stopping after {no_op_action_streak} consecutive no-op actions"
                     )
@@ -529,6 +703,11 @@ def run_single_task(
             if not should_continue:
                 break
 
+        if task_timed_out:
+            duration += datetime.datetime.now().timestamp() - start
+            test_outcomes.append(False)
+            break
+
         response = "\n\n".join(r for r in responses if r)
         duration += datetime.datetime.now().timestamp() - start
 
@@ -539,7 +718,21 @@ def run_single_task(
             raise KeyboardInterrupt
 
         try:
-            errors = run_unit_tests(original_exercise_dir, testdir, history_fname, test_files)
+            _restore_protected_files(original_exercise_dir, testdir, protected_files)
+            _enforce_solution_only_writes(original_exercise_dir, testdir, allowed_solution_relpaths)
+            remaining_seconds = _seconds_left(task_deadline_ts)
+            if remaining_seconds is not None and remaining_seconds <= 0:
+                errors = "Task timed out (overall task deadline exceeded)!"
+                timeouts += 1
+                task_timed_out = True
+            else:
+                errors = run_unit_tests(
+                    original_exercise_dir,
+                    testdir,
+                    history_fname,
+                    test_files,
+                    timeout_seconds=remaining_seconds,
+                )
         except subprocess.TimeoutExpired:
             errors = "Tests timed out!"
             timeouts += 1
@@ -555,9 +748,15 @@ def run_single_task(
             current_instructions += TEST_FAILURES.format(file_list=file_list)
             if extra_planning_instructions:
                 current_instructions += f"\n\n####\n\n{extra_planning_instructions}\n"
+
+            if task_timed_out:
+                break
         else:
             test_outcomes.append(True)
             break
+
+    if not test_outcomes and task_timed_out:
+        test_outcomes.append(False)
 
     if tracker is not None:
         try:
@@ -608,6 +807,8 @@ def run_single_task(
         "prompt_tokens": coder.total_tokens_sent + planner_prompt_tokens,
         "completion_tokens": coder.total_tokens_received + planner_completion_tokens,
         "thinking_tokens": None,
+        "task_timed_out": task_timed_out,
+        "task_timeout_seconds": task_timeout_seconds,
         "codecarbon_emissions_kg": task_emissions_kg,
         "codecarbon_energy_kwh": task_energy_kwh,
         "arch_planning_enabled": True,
@@ -663,7 +864,41 @@ def main() -> int:
 
     commit_hash = get_commit_hash()
 
-    retry_timeout = int(os.environ.get("AIDER_BENCH_RETRY_TIMEOUT", str(24 * 60 * 60)))
+    task_timeout_seconds = MAX_TASK_TIMEOUT_SECONDS
+    task_timeout_raw = os.environ.get("AIDER_BENCH_TASK_TIMEOUT_SECONDS", "").strip()
+    if task_timeout_raw:
+        try:
+            task_timeout_seconds = int(task_timeout_raw)
+        except Exception:
+            task_timeout_seconds = MAX_TASK_TIMEOUT_SECONDS
+
+    if task_timeout_seconds <= 0:
+        print(
+            f"Invalid AIDER_BENCH_TASK_TIMEOUT_SECONDS={task_timeout_seconds}. "
+            f"Using hard cap {MAX_TASK_TIMEOUT_SECONDS}s."
+        )
+        task_timeout_seconds = MAX_TASK_TIMEOUT_SECONDS
+    elif task_timeout_seconds > MAX_TASK_TIMEOUT_SECONDS:
+        print(
+            f"AIDER_BENCH_TASK_TIMEOUT_SECONDS={task_timeout_seconds} exceeds hard cap "
+            f"{MAX_TASK_TIMEOUT_SECONDS}s. Capping to {MAX_TASK_TIMEOUT_SECONDS}s."
+        )
+        task_timeout_seconds = MAX_TASK_TIMEOUT_SECONDS
+
+    retry_timeout_raw = os.environ.get("AIDER_BENCH_RETRY_TIMEOUT", "").strip()
+    if retry_timeout_raw:
+        try:
+            retry_timeout = int(retry_timeout_raw)
+        except Exception:
+            retry_timeout = 60
+    else:
+        # Keep retries short by default so one bad request can't stall a task for too long.
+        retry_timeout = 60
+
+    if task_timeout_seconds > 0:
+        retry_timeout = min(retry_timeout, task_timeout_seconds)
+    retry_timeout = min(retry_timeout, 15)
+
     sendchat.RETRY_TIMEOUT = retry_timeout
     base_coder.RETRY_TIMEOUT = retry_timeout
     models.RETRY_TIMEOUT = retry_timeout
@@ -675,6 +910,12 @@ def main() -> int:
             llm_timeout = int(llm_timeout_raw)
         except Exception:
             llm_timeout = 0
+    elif task_timeout_seconds > 0:
+        # Bound single model calls so tasks can honor their wall-clock cap.
+        llm_timeout = min(120, task_timeout_seconds)
+
+    if llm_timeout > 0:
+        llm_timeout = min(llm_timeout, 30)
 
     extra_instructions = os.environ.get("AIDER_BENCH_EXTRA_INSTRUCTIONS", "").strip()
 
@@ -697,6 +938,7 @@ def main() -> int:
             arch_max_steps=max(1, args.arch_max_steps),
             commit_hash=commit_hash,
             llm_timeout=(llm_timeout if llm_timeout > 0 else None),
+            task_timeout_seconds=(task_timeout_seconds if task_timeout_seconds > 0 else None),
         )
 
     if args.threads <= 1:

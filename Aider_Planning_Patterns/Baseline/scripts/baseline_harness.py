@@ -45,13 +45,37 @@ Fix the code in {file_list} to resolve the errors.
 """
 
 
+def _seconds_left(deadline_ts: Optional[float]) -> Optional[int]:
+    if deadline_ts is None:
+        return None
+    return int(deadline_ts - datetime.datetime.now().timestamp())
+
+
+def _effective_call_timeout(remaining_seconds: Optional[int], llm_timeout: Optional[int]) -> Optional[int]:
+    if remaining_seconds is not None:
+        if remaining_seconds <= 0:
+            return None
+        if llm_timeout and llm_timeout > 0:
+            return max(1, min(remaining_seconds, llm_timeout))
+        return max(1, remaining_seconds)
+    return llm_timeout
+
+
 def cleanup_test_output(output: str, testdir: Path) -> str:
     res = re.sub(r"\bin \d+\.\d+s\b", "", output)
     return res.replace(str(testdir), str(testdir.name))
 
 
-def run_unit_tests(original_exercise_dir: Path, testdir: Path, history_fname: Path, test_files: list[str]) -> Optional[str]:
+def run_unit_tests(
+    original_exercise_dir: Path,
+    testdir: Path,
+    history_fname: Path,
+    test_files: list[str],
+    timeout_seconds: Optional[int] = None,
+) -> Optional[str]:
     timeout = 60 * 3
+    if timeout_seconds is not None and timeout_seconds > 0:
+        timeout = min(timeout, timeout_seconds)
 
     test_commands = {
         ".py": ["pytest"],
@@ -173,6 +197,7 @@ def run_single_task(
     extra_instructions: str,
     commit_hash: str,
     llm_timeout: Optional[int],
+    task_timeout_seconds: Optional[int],
 ) -> dict[str, Any]:
     tracker = None
     task_emissions_kg = None
@@ -235,6 +260,9 @@ def run_single_task(
         main_model.timeout = llm_timeout
 
     actual_edit_format = edit_format or main_model.edit_format
+    # IMPORTANT: Only pass solution files to coder, never test/example files.
+    # This prevents model confusion about which files are editable.
+    # Test files are only used for validation, not given to the model.
     coder = Coder.create(
         main_model,
         actual_edit_format,
@@ -257,8 +285,23 @@ def run_single_task(
     duration = 0.0
     test_outcomes: list[bool] = []
     current_instructions = instructions
+    task_timed_out = False
+    task_deadline_ts: Optional[float] = None
+    if task_timeout_seconds and task_timeout_seconds > 0:
+        task_deadline_ts = datetime.datetime.now().timestamp() + task_timeout_seconds
 
     for _ in range(tries):
+        remaining_seconds = _seconds_left(task_deadline_ts)
+        if remaining_seconds is not None and remaining_seconds <= 0:
+            task_timed_out = True
+            break
+
+        call_timeout = _effective_call_timeout(remaining_seconds, llm_timeout)
+        if call_timeout is None:
+            task_timed_out = True
+            break
+        main_model.timeout = call_timeout
+
         start = datetime.datetime.now().timestamp()
 
         response = coder.run(with_message=current_instructions, preproc=False)
@@ -271,7 +314,19 @@ def run_single_task(
             raise KeyboardInterrupt
 
         try:
-            errors = run_unit_tests(original_exercise_dir, testdir, history_fname, test_files)
+            remaining_seconds = _seconds_left(task_deadline_ts)
+            if remaining_seconds is not None and remaining_seconds <= 0:
+                errors = "Task timed out (overall task deadline exceeded)!"
+                timeouts += 1
+                task_timed_out = True
+            else:
+                errors = run_unit_tests(
+                    original_exercise_dir,
+                    testdir,
+                    history_fname,
+                    test_files,
+                    timeout_seconds=remaining_seconds,
+                )
         except subprocess.TimeoutExpired:
             errors = "Tests timed out!"
             timeouts += 1
@@ -286,9 +341,15 @@ def run_single_task(
             current_instructions += TEST_FAILURES.format(file_list=file_list)
             if extra_instructions:
                 current_instructions += f"\n\n####\n\n{extra_instructions}\n"
+
+            if task_timed_out:
+                break
         else:
             test_outcomes.append(True)
             break
+
+    if not test_outcomes and task_timed_out:
+        test_outcomes.append(False)
 
     if tracker is not None:
         try:
@@ -329,6 +390,8 @@ def run_single_task(
         "prompt_tokens": coder.total_tokens_sent,
         "completion_tokens": coder.total_tokens_received,
         "thinking_tokens": None,
+        "task_timed_out": task_timed_out,
+        "task_timeout_seconds": task_timeout_seconds,
         "codecarbon_emissions_kg": task_emissions_kg,
         "codecarbon_energy_kwh": task_energy_kwh,
         "arch_planning_enabled": False,
@@ -383,7 +446,29 @@ def main() -> int:
 
     commit_hash = get_commit_hash()
 
-    retry_timeout = int(os.environ.get("AIDER_BENCH_RETRY_TIMEOUT", str(24 * 60 * 60)))
+    task_timeout_seconds = 15 * 60
+    task_timeout_raw = os.environ.get("AIDER_BENCH_TASK_TIMEOUT_SECONDS", "").strip()
+    if task_timeout_raw:
+        try:
+            task_timeout_seconds = int(task_timeout_raw)
+        except Exception:
+            task_timeout_seconds = 15 * 60
+    if task_timeout_seconds < 0:
+        task_timeout_seconds = 0
+
+    retry_timeout_raw = os.environ.get("AIDER_BENCH_RETRY_TIMEOUT", "").strip()
+    if retry_timeout_raw:
+        try:
+            retry_timeout = int(retry_timeout_raw)
+        except Exception:
+            retry_timeout = 60
+    else:
+        # Keep retries short by default so one bad request can't stall a task for too long.
+        retry_timeout = 60
+
+    if task_timeout_seconds > 0:
+        retry_timeout = min(retry_timeout, task_timeout_seconds)
+
     sendchat.RETRY_TIMEOUT = retry_timeout
     base_coder.RETRY_TIMEOUT = retry_timeout
     models.RETRY_TIMEOUT = retry_timeout
@@ -395,6 +480,9 @@ def main() -> int:
             llm_timeout = int(llm_timeout_raw)
         except Exception:
             llm_timeout = 0
+    elif task_timeout_seconds > 0:
+        # Bound single model calls so tasks can honor their wall-clock cap.
+        llm_timeout = min(120, task_timeout_seconds)
 
     extra_instructions = os.environ.get("AIDER_BENCH_EXTRA_INSTRUCTIONS", "").strip()
 
@@ -416,6 +504,7 @@ def main() -> int:
             extra_instructions=extra_instructions,
             commit_hash=commit_hash,
             llm_timeout=(llm_timeout if llm_timeout > 0 else None),
+            task_timeout_seconds=(task_timeout_seconds if task_timeout_seconds > 0 else None),
         )
 
     if args.threads <= 1:

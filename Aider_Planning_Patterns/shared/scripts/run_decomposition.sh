@@ -113,15 +113,22 @@ fi
 model_arg="${AIDER_BENCH_MODEL_PREFIX}${OLLAMA_MODEL}"
 exercises_dir="$AIDER_BENCH_EXERCISES_SUBDIR"
 
+decomp_tries="${AIDER_BENCH_DECOMP_TRIES:-1}"
+decomp_arch_max_steps="${AIDER_BENCH_DECOMP_ARCH_MAX_STEPS:-1}"
+decomp_task_timeout_seconds="${AIDER_BENCH_DECOMP_TASK_TIMEOUT_SECONDS:-900}"
+decomp_llm_timeout="${AIDER_BENCH_DECOMP_LLM_TIMEOUT:-60}"
+decomp_retry_timeout="${AIDER_BENCH_DECOMP_RETRY_TIMEOUT:-30}"
+decomp_noop_stop_threshold="${AIDER_BENCH_DECOMP_NOOP_STOP_THRESHOLD:-1}"
+
 harness_cmd=(
 	/workspace/Decomposition/scripts/decomposition_harness.py
 	--run-name "$run_name"
 	--model "$model_arg"
 	--edit-format "$AIDER_BENCH_EDIT_FORMAT"
 	--threads "$AIDER_BENCH_THREADS"
-	--tries "${AIDER_BENCH_TRIES:-2}"
+	--tries "$decomp_tries"
 	--exercises-dir "$exercises_dir"
-	--arch-max-steps "${AIDER_BENCH_ARCH_MAX_STEPS:-3}"
+	--arch-max-steps "$decomp_arch_max_steps"
 	--shuffle-tasks "${AIDER_BENCH_SHUFFLE_TASKS:-1}"
 )
 
@@ -197,6 +204,7 @@ echo "Model: $model_arg"
 echo "Planned tasks: $planned_total"
 echo "Threads: $AIDER_BENCH_THREADS"
 echo "Tries per task: ${AIDER_BENCH_TRIES:-2}"
+echo "Task timeout (per task): ${AIDER_BENCH_TASK_TIMEOUT_SECONDS:-900}s"
 if [[ -n "${AIDER_BENCH_NUM_CTX:-}" ]]; then
 	echo "Context window override (--num-ctx): $AIDER_BENCH_NUM_CTX"
 fi
@@ -238,8 +246,10 @@ docker run --rm \
 	-e AIDER_DOCKER=1 \
 	-e AIDER_BENCHMARK_DIR=/benchmarks \
 	-e AIDER_BENCH_EXTRA_INSTRUCTIONS="$DECOMP_PROMPT" \
-	-e AIDER_BENCH_LLM_TIMEOUT="${AIDER_BENCH_LLM_TIMEOUT:-}" \
-	-e AIDER_BENCH_RETRY_TIMEOUT="${AIDER_BENCH_RETRY_TIMEOUT:-}" \
+	-e AIDER_BENCH_LLM_TIMEOUT="$decomp_llm_timeout" \
+	-e AIDER_BENCH_RETRY_TIMEOUT="$decomp_retry_timeout" \
+	-e AIDER_BENCH_TASK_TIMEOUT_SECONDS="$decomp_task_timeout_seconds" \
+	-e AIDER_BENCH_DECOMP_NOOP_STOP_THRESHOLD="$decomp_noop_stop_threshold" \
 	-e OLLAMA_API_BASE="$container_ollama_base" \
 	-v "$(cd "$ROOT_DIR" && pwd)":/workspace \
 	-v "$(cd "$AIDER_DIR" && pwd)":/aider \
@@ -284,3 +294,134 @@ echo "OK: Decomposition run completed. Logs at $run_dir"
 	}
 
 echo "OK: Summary written: $summary_json, $summary_csv, and $task_csv"
+
+require_baseline_parity="${AIDER_BENCH_REQUIRE_BASELINE_PARITY:-1}"
+if [[ "$require_baseline_parity" == "1" ]]; then
+	baseline_summary_json="${AIDER_BENCH_BASELINE_SUMMARY_JSON:-}"
+	baseline_task_csv="${AIDER_BENCH_BASELINE_TASK_CSV:-}"
+
+	if [[ -z "$baseline_summary_json" ]]; then
+		latest_baseline_json="$(ls -1t Baseline/results/*--baseline--*.json 2>/dev/null | head -n 1 || true)"
+		baseline_summary_json="$latest_baseline_json"
+	fi
+
+	if [[ -z "$baseline_task_csv" ]]; then
+		latest_baseline_task_csv="$(ls -1t Baseline/results/*--baseline--*.tasks.csv 2>/dev/null | head -n 1 || true)"
+		baseline_task_csv="$latest_baseline_task_csv"
+	fi
+
+	if [[ -z "$baseline_summary_json" || ! -f "$baseline_summary_json" ]]; then
+		echo "ERROR: Baseline parity is enabled but baseline summary JSON was not found." >&2
+		echo "Set AIDER_BENCH_BASELINE_SUMMARY_JSON or run baseline first." >&2
+		exit 7
+	fi
+
+	require_per_task_parity="${AIDER_BENCH_REQUIRE_PER_TASK_PARITY:-0}"
+
+	"$PY" - "$summary_json" "$task_csv" "$baseline_summary_json" "$baseline_task_csv" "$require_per_task_parity" <<'PY'
+import csv
+import json
+import math
+import os
+import sys
+from pathlib import Path
+
+
+def as_bool(raw):
+	if isinstance(raw, bool):
+		return raw
+	if isinstance(raw, (int, float)):
+		return bool(raw)
+	if isinstance(raw, str):
+		v = raw.strip().lower()
+		if v in {"1", "true", "yes", "y", "pass", "passed"}:
+			return True
+		if v in {"0", "false", "no", "n", "fail", "failed"}:
+			return False
+	return False
+
+
+def load_summary(path: Path):
+	data = json.loads(path.read_text(encoding="utf-8"))
+	task_count = int(data.get("task_count", 0) or 0)
+	passed = int(data.get("passed_count", 0) or 0)
+	rate = (passed / task_count) if task_count > 0 else 0.0
+	return task_count, passed, rate
+
+
+def load_task_csv(path: Path):
+	rows = {}
+	with path.open("r", encoding="utf-8", newline="") as f:
+		reader = csv.DictReader(f)
+		for row in reader:
+			key = (row.get("task_path") or "").strip()
+			if not key:
+				continue
+			rows[key] = as_bool(row.get("passed"))
+	return rows
+
+
+decomp_summary_path = Path(sys.argv[1])
+decomp_task_csv_path = Path(sys.argv[2])
+baseline_summary_path = Path(sys.argv[3])
+baseline_task_csv_arg = sys.argv[4].strip()
+require_per_task = sys.argv[5].strip() == "1"
+
+decomp_tasks, decomp_passed, decomp_rate = load_summary(decomp_summary_path)
+baseline_tasks, baseline_passed, baseline_rate = load_summary(baseline_summary_path)
+
+print(
+	f"Accuracy gate (overall): decomposition={decomp_passed}/{decomp_tasks} ({decomp_rate:.3f}), "
+	f"baseline={baseline_passed}/{baseline_tasks} ({baseline_rate:.3f})"
+)
+
+if decomp_rate + 1e-12 < baseline_rate:
+	print("ERROR: Decomposition overall accuracy is below baseline.", file=sys.stderr)
+	sys.exit(2)
+
+if baseline_task_csv_arg:
+	baseline_task_csv = Path(baseline_task_csv_arg)
+else:
+	baseline_task_csv = None
+
+if baseline_task_csv and baseline_task_csv.exists() and decomp_task_csv_path.exists():
+	decomp_rows = load_task_csv(decomp_task_csv_path)
+	baseline_rows = load_task_csv(baseline_task_csv)
+	shared = sorted(set(decomp_rows) & set(baseline_rows))
+
+	if shared:
+		decomp_shared_pass = sum(1 for k in shared if decomp_rows[k])
+		baseline_shared_pass = sum(1 for k in shared if baseline_rows[k])
+		decomp_shared_rate = decomp_shared_pass / len(shared)
+		baseline_shared_rate = baseline_shared_pass / len(shared)
+
+		print(
+			f"Accuracy gate (matched tasks): decomposition={decomp_shared_pass}/{len(shared)} "
+			f"({decomp_shared_rate:.3f}), baseline={baseline_shared_pass}/{len(shared)} "
+			f"({baseline_shared_rate:.3f}), shared={len(shared)}"
+		)
+
+		if decomp_shared_rate + 1e-12 < baseline_shared_rate:
+			print("ERROR: Decomposition matched-task accuracy is below baseline.", file=sys.stderr)
+			sys.exit(3)
+
+		if require_per_task:
+			regressions = [k for k in shared if baseline_rows[k] and not decomp_rows[k]]
+			if regressions:
+				print(
+					f"ERROR: Per-task baseline parity failed for {len(regressions)} tasks. "
+					f"First regressions: {', '.join(regressions[:5])}",
+					file=sys.stderr,
+				)
+				sys.exit(4)
+	else:
+		print("WARNING: No overlapping task keys found between decomposition and baseline task CSVs.")
+elif baseline_task_csv_arg:
+	print(
+		f"WARNING: Baseline task CSV not found at {baseline_task_csv_arg}. "
+		"Skipping matched-task gate and using overall gate only."
+	)
+
+print("OK: Baseline accuracy parity checks passed.")
+PY
+fi

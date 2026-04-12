@@ -213,6 +213,7 @@ echo "Model: $model_arg"
 echo "Planned tasks: $planned_total"
 echo "Threads: $AIDER_BENCH_THREADS"
 echo "Tries per task: ${AIDER_BENCH_TRIES:-2}"
+echo "Task timeout (per task): ${AIDER_BENCH_TASK_TIMEOUT_SECONDS:-900}s"
 echo "Shuffle tasks: ${AIDER_BENCH_SHUFFLE_TASKS:-1}"
 if [[ -n "${AIDER_BENCH_NUM_CTX:-}" ]]; then
   echo "Context window override (--num-ctx): $AIDER_BENCH_NUM_CTX"
@@ -258,6 +259,7 @@ docker run --rm \
   -e AIDER_BENCH_EXTRA_INSTRUCTIONS="${AIDER_BENCH_EXTRA_INSTRUCTIONS:-}" \
   -e AIDER_BENCH_RETRY_TIMEOUT="${AIDER_BENCH_RETRY_TIMEOUT:-}" \
   -e AIDER_BENCH_LLM_TIMEOUT="${AIDER_BENCH_LLM_TIMEOUT:-}" \
+  -e AIDER_BENCH_TASK_TIMEOUT_SECONDS="${AIDER_BENCH_TASK_TIMEOUT_SECONDS:-900}" \
   -e OLLAMA_API_BASE="$container_ollama_base" \
   -v "$(cd "$ROOT_DIR" && pwd)":/workspace \
   -v "$(cd "$AIDER_DIR" && pwd)":/aider \
