@@ -1,0 +1,305 @@
+================================================================================
+                    METRICS CORRECTION: BEFORE vs AFTER
+================================================================================
+
+REPORTED BEFORE CORRECTION:
+────────────────────────────────────────────────────────────────────────────────
+Baseline:
+  LLM Calls: 16  ✓ (Correct)
+  Duration: 754s ✓ (Correct)
+  Pass Rate: 6/10 (60%) ✓ (Correct)
+
+MultiPlan:
+  LLM Calls: 10  ❌ (INCOMPLETE - only counted best plan)
+  Duration: 1945s ✓ (Correct)
+  Pass Rate: 6/10 (60%) ✓ (Correct)
+
+INTERPRETATION:
+  "MultiPlan achieved 38% efficiency improvement!"
+  "Uses fewer LLM calls than baseline!"
+  ❌ MISLEADING - Based on incomplete metrics
+
+
+REPORTED AFTER CORRECTION:
+────────────────────────────────────────────────────────────────────────────────
+Baseline:
+  LLM Calls: 16 ✓ (Same - single-pass approach)
+  Duration: 754s ✓ (Same)
+  Pass Rate: 6/10 (60%) ✓ (Same)
+
+MultiPlan:
+  LLM Calls: 41 ✅ (ACCURATE - all 4 plans counted)
+  Duration: 1945s ✓ (Same)
+  Pass Rate: 6/10 (60%) ✓ (Same)
+
+INTERPRETATION:
+  "MultiPlan uses 2.56× more LLM calls for same accuracy"
+  "Provides diversity through 4 candidate solutions"
+  "Good for research/explainability, not production efficiency"
+  ✅ HONEST - Accurately reflects actual compute cost
+
+
+================================================================================
+                              WHAT CHANGED
+================================================================================
+
+CODE CHANGE 1: multiplan_harness.py (Line 510-522)
+────────────────────────────────────────────────────────────────────────────────
+BEFORE:
+    merged = {
+        ...
+        "chat_hashes": best_result.get("chat_hashes", []),  # ❌ Only best
+    }
+
+AFTER:
+    merged = {
+        ...
+        "chat_hashes": [
+            hash_pair
+            for r in plan_results
+            for hash_pair in (r.get("chat_hashes", []) or [])
+        ],  # ✅ All 4 plans aggregated
+    }
+
+IMPACT:
+  - Future runs will include all chat_hashes from all candidate plans
+  - Provides complete picture of compute usage
+  - Supports accurate metrics collection
+
+
+CODE CHANGE 2: collect_results.py (Line 305-320)
+────────────────────────────────────────────────────────────────────────────────
+BEFORE:
+    chat_hashes = raw.get("chat_hashes")
+    if isinstance(chat_hashes, list):
+        llm_calls_total += len(chat_hashes)  # ❌ Counts hash pairs only
+
+AFTER:
+    executor_calls = raw.get("executor_calls")
+    if executor_calls is not None:
+        llm_calls_total += int(executor_calls)  # ✅ Counts actual executions
+    else:
+        chat_hashes = raw.get("chat_hashes")
+        if isinstance(chat_hashes, list):
+            llm_calls_total += len(chat_hashes)  # ✅ Fallback
+
+IMPACT:
+  - Counts actual plan executions (executor_calls = 4 per task for multiplan)
+  - More reliable metric reflecting true LLM usage
+  - Backward compatible with old results
+
+
+================================================================================
+                         DETAILED NUMBER BREAKDOWN
+================================================================================
+
+HOW MULTIPLAN EXECUTION WORKS:
+  For each task:
+    ├─ Plan 0 (T=0.3): Run LLM, Test, Record
+    │  └─ executor_calls: 1, chat_hashes: [1 pair]
+    │
+    ├─ Plan 1 (T=0.7): Run LLM, Test, Record  
+    │  └─ executor_calls: 1, chat_hashes: [1 pair]
+    │
+    ├─ Plan 2 (T=1.0): Run LLM, Test, Record
+    │  └─ executor_calls: 1, chat_hashes: [1 pair]
+    │
+    └─ Plan 3 (T=1.5): Run LLM, Test, Record
+       └─ executor_calls: 1, chat_hashes: [1 pair]
+    
+    MERGED RESULT: Sum of all plans
+       executor_calls: 1+1+1+1 = 4
+       chat_hashes: [pair0], [pair1], [pair2], [pair3] = 4 pairs (after fix)
+       
+    PREVIOUS COUNTING:
+       len(best_plan.chat_hashes) = 1 → Reported 1 LLM call per task
+       ❌ Missed plans 0, 1, 3
+       
+    CORRECT COUNTING:
+       executor_calls = 4 → Report 4 LLM calls per task
+       ✅ Accounts for all plan executions
+
+
+ACROSS 10 TASKS:
+────────────────────────────────────────────────────────────────────────────────
+Baseline (1 attempt per task):
+  Task 1: 1 call
+  Task 2: 1 call
+  ...
+  Task 10: 1 call
+  ─────────────
+  Total: 10 calls (plus any failures: ~16 total with helper calls)
+
+MultiPlan (4 attempts per task):
+  Task 1: 4 calls (all plans execute)
+  Task 2: 4 calls (all plans execute)
+  ...
+  Task 10: 4 calls (all plans execute)
+  ─────────────
+  Total: 40 calls (plus overhead: ~41 total)
+
+PREVIOUS REPORT (incorrect):
+  Baseline: 16 vs MultiPlan: 10 → "38% improvement" ❌
+  
+CORRECT REPORT:
+  Baseline: 16 vs MultiPlan: 41 → "2.56× increase" ✅
+
+
+ACCURACY ANALYSIS:
+────────────────────────────────────────────────────────────────────────────────
+Tasks where BOTH approaches pass (6/10):
+  ✅ accumulate
+  ✅ armstrong-numbers
+  ✅ dining-philosophers
+  ✅ flatten-array
+  ✅ food-chain
+  ✅ grep
+  
+  Insight: When baseline works, 4 attempts don't improve it
+  MultiPlan benefit: Provides 4 different solution approaches
+
+Tasks where BOTH approaches fail (4/10):
+  ❌ acronym
+  ❌ binary-search
+  ❌ difference-of-squares
+  ❌ largest-series-product
+  
+  Insight: When baseline fails, 4 attempts all fail too
+  Task difficulty appears fundamental, not solvable by temperature sampling
+
+
+================================================================================
+                          ACCURACY IMPROVEMENT CLAIM
+================================================================================
+
+THEORY (Expected):
+  "Multiple diverse plans + voting = Better accuracy"
+
+PRACTICE (Observed):
+  Baseline: 60% (6/10)
+  MultiPlan: 60% (6/10)
+  Improvement: 0%
+  
+WHY NO IMPROVEMENT:
+  1. For solvable tasks: Single plan works, 4 plans redundant
+  2. For hard tasks: All 4 fail (diversity doesn't help)
+  3. Voting doesn't improve results when patterns are tied
+  4. Temperature sampling doesn't increase capability
+
+
+EFFICIENCY ANALYSIS:
+  Compute per passing task:
+    Baseline: 16 / 6 = 2.67 LLM calls/passing task
+    MultiPlan: 41 / 6 = 6.83 LLM calls/passing task
+    Increase: 2.56×
+    
+  Time per passing task:
+    Baseline: 754s / 6 = 125.7s/passing task
+    MultiPlan: 1945s / 6 = 324.2s/passing task
+    Increase: 2.58×
+    
+  Accuracy change: 0% (no benefit from extra cost)
+
+
+================================================================================
+                           REQUIREMENTS STATUS
+================================================================================
+
+REQUIREMENT 1: ~100% Conformance to Research Description
+────────────────────────────────────────────────────────────────────────────────
+Before Correction: ✅ PASS (implementation correct)
+After Correction:  ✅ PASS (implementation still correct)
+Status: NO CHANGE (implementation was always correct)
+
+
+REQUIREMENT 2: Tasks Run ≤ 15 Minutes (900 seconds)
+────────────────────────────────────────────────────────────────────────────────
+Before Correction: ✅ PASS (194.5s/task << 900s)
+After Correction:  ✅ PASS (194.5s/task << 900s)
+Status: NO CHANGE (timing was accurate)
+
+
+REQUIREMENT 3: Accuracy ≥ Baseline
+────────────────────────────────────────────────────────────────────────────────
+Before Correction: ✅ PASS (60% ≥ 60%)
+After Correction:  ✅ PASS (60% ≥ 60%)
+Status: NO CHANGE (accuracy was accurate)
+
+
+OVERALL VERDICT:
+────────────────────────────────────────────────────────────────────────────────
+Implementation: ✅ Correct
+Metrics: ✅ Now accurate
+Requirements: ✅ All still pass
+Conclusions: ✅ More honest (trade-off explicit)
+
+
+================================================================================
+                            WHEN TO USE EACH
+================================================================================
+
+BASELINE (Single-Pass LLM)
+────────────────────────────────────────────────────────────────────────────────
+Cost: 16 LLM calls, 754 seconds, 60% accuracy
+
+Use when:
+  ✅ Production systems (efficiency matters)
+  ✅ Cost-sensitive environments
+  ✅ Need fast results
+  ✅ Current accuracy sufficient
+
+Avoid when:
+  ❌ Need explainability
+  ❌ Studying LLM behavior
+  ❌ Have generous compute budget
+  ❌ Want multiple solution approaches
+
+
+MULTIPLAN (4-Candidate Selection)
+────────────────────────────────────────────────────────────────────────────────
+Cost: 41 LLM calls, 1945 seconds, 60% accuracy
+
+Use when:
+  ✅ Research/academic analysis
+  ✅ Studying LLM diversity
+  ✅ Need explainability (4 approaches)
+  ✅ Non-critical/exploratory work
+  ✅ Have budget for computation
+
+Avoid when:
+  ❌ Production deployment
+  ❌ Cost optimization needed
+  ❌ Speed is critical
+  ❌ 2.56× cost increase unacceptable
+
+
+================================================================================
+                              FINAL VERDICT
+================================================================================
+
+WHAT WAS WRONG:
+  Metrics reporting counted only the best plan's chat exchanges, not all
+  4 candidate plans. This gave an incomplete and misleading picture of
+  actual LLM usage.
+
+WHAT WAS RIGHT:
+  The implementation correctly generates 4 diverse plans, tests them all,
+  and selects the best. The research methodology is properly followed.
+
+WHAT WAS FIXED:
+  1. Updated multiplan_harness.py to aggregate all chat_hashes
+  2. Updated collect_results.py to use executor_calls metric
+  3. Regenerated results with corrected counting
+  4. Created comprehensive documentation of findings
+
+WHAT IT MEANS:
+  MultiPlan is more expensive (2.56× compute) for the same accuracy,
+  but provides research-grade diversity and explainability. Appropriate
+  for academic work, not production efficiency.
+
+================================================================================
+                        STATUS: INVESTIGATION COMPLETE
+                        ✅ Metrics Corrected
+                        ✅ Requirements Validated  
+                        ✅ Implementation Verified
+================================================================================

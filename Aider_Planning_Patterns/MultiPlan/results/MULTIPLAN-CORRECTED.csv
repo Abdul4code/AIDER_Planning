@@ -1,0 +1,2 @@
+run_name,model,timestamp,task_count,passed_count,failed_count,llm_calls_total,codecarbon_energy_kwh_total,codecarbon_emissions_kg_total,duration_seconds,output_path
+multiplan-corrected,qwen2.5-coder:7b-instruct,2026-04-12T14:27:41+0200,10,6,4,41,0.02353319397238068,0.006298000437276464,0.003489971160888672,/Users/abdul4code/Desktop/AI/AIDER_Planning/Aider_Planning_Patterns/benchmark/runs/20260412-134245--multiplan--qwen2.5-coder-7b-instruct/tmp.benchmarks/2026-04-12-11-42-53--20260412-134245--multiplan--qwen2.5-coder-7b-instruct

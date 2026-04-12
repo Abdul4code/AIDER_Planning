@@ -310,9 +310,18 @@ def main() -> int:
             failed += 1
 
         if isinstance(raw, dict):
-            chat_hashes = raw.get("chat_hashes")
-            if isinstance(chat_hashes, list):
-                llm_calls_total += len(chat_hashes)
+            # Prefer executor_calls for accurate LLM call counting (captures all plan executions)
+            # Fall back to chat_hashes if executor_calls not available
+            executor_calls = raw.get("executor_calls")
+            if executor_calls is not None:
+                try:
+                    llm_calls_total += int(executor_calls)
+                except (ValueError, TypeError):
+                    pass
+            else:
+                chat_hashes = raw.get("chat_hashes")
+                if isinstance(chat_hashes, list):
+                    llm_calls_total += len(chat_hashes)
             try:
                 energy = raw.get("codecarbon_energy_kwh")
                 if energy is not None:

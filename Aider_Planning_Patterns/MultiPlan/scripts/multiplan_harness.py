@@ -519,7 +519,11 @@ def run_single_task_multiplan(
             }
             for r in plan_results
         ],
-        "chat_hashes": best_result.get("chat_hashes", []),
+        "chat_hashes": [
+            hash_pair
+            for r in plan_results
+            for hash_pair in (r.get("chat_hashes", []) or [])
+        ],
     }
     
     # Write merged results

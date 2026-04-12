@@ -1,0 +1,11 @@
+task_path,testcase,passed,arch_planning_enabled,planner_calls,executor_calls,arch_plan_steps,tries_recorded,tries_passed,tries_failed,llm_calls,duration_seconds,prompt_tokens,completion_tokens,num_error_outputs,num_malformed_responses,num_exhausted_context_windows,test_timeouts,codecarbon_energy_kwh,codecarbon_emissions_kg
+python/exercises/practice/accumulate/.aider.results.json,accumulate,True,True,4,4,4,1,1,0,1,74.83757996559143,4451,941,0,0,0,0,0.0009761206438745846,0.00026123135895500413
+python/exercises/practice/acronym/.aider.results.json,acronym,True,True,4,4,4,1,1,0,1,117.4970211982727,4548,1402,0,0,0,0,0.001492143312924445,0.0003993303776914659
+python/exercises/practice/affine-cipher/.aider.results.json,affine-cipher,False,True,4,5,4,1,0,1,1,407.2680432796478,12827,3289,0,0,0,0,0.00515691415567389,0.001380103680169758
+python/exercises/practice/all-your-base/.aider.results.json,all-your-base,True,True,4,4,4,1,1,0,1,180.28397297859192,7003,1634,0,0,0,0,0.0022862057954670736,0.0006118389673944891
+python/exercises/practice/allergies/.aider.results.json,allergies,True,True,4,4,4,1,1,0,1,224.22954607009888,5245,2749,0,0,0,0,0.002841959312131112,0.0007605708350311526
+python/exercises/practice/alphametics/.aider.results.json,alphametics,False,True,4,4,4,1,0,1,1,216.03991389274597,5115,2568,0,0,0,0,0.002738343962670694,0.0007328410879778566
+python/exercises/practice/anagram/.aider.results.json,anagram,True,True,4,4,4,1,1,0,1,180.46088695526123,5769,2002,0,0,0,0,0.0022884407359787654,0.0006124370866441092
+python/exercises/practice/armstrong-numbers/.aider.results.json,armstrong-numbers,True,True,4,4,4,1,1,0,1,123.32382798194885,4903,1461,0,0,0,0,0.0015657127706466582,0.000419019183106
+python/exercises/practice/atbash-cipher/.aider.results.json,atbash-cipher,False,True,4,4,4,1,0,1,1,206.35418605804443,5466,2523,0,0,0,0,0.0026160094255830487,0.0007001016744933868
+python/exercises/practice/bank-account/.aider.results.json,bank-account,False,True,4,4,4,1,0,1,1,123.57207822799683,8031,1295,0,0,0,0,0.0015713438574304116,0.0004205261858132417
