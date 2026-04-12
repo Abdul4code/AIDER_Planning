@@ -9,7 +9,8 @@ This repo intentionally does **not** include SWE-bench, SWE-agent, or any other 
 - `shared/` – common scripts/config used by all variants
 - `benchmark/` – benchmark repos + run artifacts
 - `Baseline/` – baseline runner + result summaries
-- `Memory/`, `Decomposition/`, `Reflection/`, `MultiPlan/` – placeholders for future variants
+- `MultiPlan/` – **multi-plan selection variant** (research-grade implementation)
+- `Memory/`, `Decomposition/`, `Reflection/` – placeholders for future variants
 
 ## Prerequisites
 
@@ -102,11 +103,49 @@ AIDER_BENCH_SHUFFLE_TASKS=0 bash shared/scripts/run_baseline.sh
   - `tmp.benchmarks/` (benchmark output tree)
 - Summaries: `Baseline/results/<run_name>.json` and `.csv`
 
+## Run MultiPlan experiment
+
+**Research-grade multi-plan selection** using Self-Consistency sampling and majority voting:
+
+```bash
+bash shared/scripts/run_multiplan.sh
+```
+
+What it does:
+1. Generates 4 candidate plans per task (temperature: 0.3, 0.7, 1.0, 1.5)
+2. Executes each plan independently
+3. Selects best plan using majority vote on test outcomes
+4. Reports aggregated metrics + per-plan breakdown
+
+Customize number of plans:
+
+```bash
+AIDER_BENCH_NUM_PLANS=3 bash shared/scripts/run_multiplan.sh
+```
+
+**Documentation**: See [MultiPlan/README.md](MultiPlan/README.md) and [MULTIPLAN_IMPLEMENTATION.md](MULTIPLAN_IMPLEMENTATION.md) for detailed design.
+
+**Compare results**:
+
+```bash
+python3 compare_multiplan_results.py \
+  "Baseline/results/<baseline.json>" \
+  "MultiPlan/results/<multiplan.json>"
+```
+
+## Validate MultiPlan implementation
+
+```bash
+bash validate_multiplan.sh
+```
+
+Checks all components are in place (syntax, files, functions, strategies).
+
 ## Notes / TODOs
 
-- Baseline and Decomposition both use sidecar harnesses in this repo and avoid patching upstream Aider.
+- Baseline, MultiPlan, and other variants all use sidecar harnesses in this repo to avoid patching upstream Aider.
 - If upstream Aider internals change substantially, update:
   - `Baseline/scripts/baseline_harness.py`
-  - `Decomposition/scripts/decomposition_harness.py`
+  - `MultiPlan/scripts/multiplan_harness.py`
   - `Baseline/scripts/collect_results.py`
 
