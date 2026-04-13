@@ -18,6 +18,7 @@ Based on:
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime
 import json
 import os
@@ -25,6 +26,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
@@ -504,6 +506,15 @@ def run_single_task(
     }
 
     results_fname.write_text(json.dumps(results, indent=4) + "\n", encoding="utf-8")
+    
+    # Print result incrementally with status
+    task_name = testdir.name
+    passed = results.get("tests_outcomes") and results["tests_outcomes"][-1]
+    status = "✓" if passed else "✗"
+    print(f"{status} Task completed: {task_name} (attempts: {len([o for o in results.get('tests_outcomes', []) if o is not None])}, reflections: {reflection_count})", flush=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
     return results
 
 
@@ -545,6 +556,34 @@ def main() -> int:
     print(f"Selected tasks: {len(tasks)}")
 
     commit_hash = get_commit_hash()
+    
+    # Prepare results CSV for incremental writing
+    # Get absolute path - results go to workspace Reflection/results if AIDER_RESULTS_DIR not set
+    results_dir_env = os.environ.get("AIDER_RESULTS_DIR", "").strip()
+    if results_dir_env:
+        results_dir = Path(results_dir_env)
+    else:
+        # Inside docker, /workspace is the mounted workspace
+        # Try to find it, otherwise use relative path (will be relative to cwd)
+        workspace = Path("/workspace")
+        if workspace.exists():
+            results_dir = workspace / "Reflection" / "results"
+        else:
+            results_dir = Path("Reflection/results")
+    
+    results_dir = results_dir.resolve()  # Make absolute
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    model_safe = args.model.replace("/", "--")
+    csv_base = results_dir / f"{timestamp}--reflection--{model_safe}"
+    
+    task_csv_path = csv_base.with_name(f"{csv_base.name}.tasks.csv")
+    summary_json_path = csv_base.with_suffix(".json")
+    summary_csv_path = csv_base.with_suffix(".csv")
+    
+    print(f"Results CSV (absolute path): {task_csv_path}")
+    print(f"  Exists: {results_dir.exists()}, Writable: {os.access(results_dir, os.W_OK)}")
 
     task_timeout_seconds = 15 * 60
     task_timeout_raw = os.environ.get("AIDER_BENCH_TASK_TIMEOUT_SECONDS", "").strip()
@@ -606,15 +645,46 @@ def main() -> int:
         )
 
     results = []
+    csv_fieldnames = None
+    csv_header_written = False
+    
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         futures = [executor.submit(work, task) for task in tasks]
+        completed_count = 0
 
         for future in as_completed(futures):
             try:
                 result = future.result()
                 results.append(result)
+                completed_count += 1
+                
+                # Write result incrementally to task CSV
+                if csv_fieldnames is None and result:
+                    csv_fieldnames = list(result.keys())
+                
+                if csv_fieldnames and result:
+                    # Write header on first result
+                    if not csv_header_written:
+                        with open(task_csv_path, "w", newline="") as f:
+                            writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
+                            writer.writeheader()
+                            f.flush()
+                            os.fsync(f.fileno())
+                        csv_header_written = True
+                    
+                    # Append this result
+                    with open(task_csv_path, "a", newline="") as f:
+                        writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
+                        writer.writerow(result)
+                        f.flush()
+                        os.fsync(f.fileno())
+                
+                print(f"[{completed_count}/{len(tasks)}] Result collected and written to CSV", flush=True)
+                sys.stdout.flush()
+                sys.stderr.flush()
             except Exception as e:
-                print(f"Task failed with exception: {e}")
+                print(f"Task failed with exception: {e}", flush=True)
+                sys.stderr.flush()
 
     passed_count = sum(1 for r in results if r["tests_outcomes"] and r["tests_outcomes"][-1])
     failed_count = sum(1 for r in results if not (r["tests_outcomes"] and r["tests_outcomes"][-1]))
@@ -627,6 +697,12 @@ def main() -> int:
     total_emissions_kg = sum(r["codecarbon_emissions_kg"] or 0.0 for r in results)
     total_energy_kwh = sum(r["codecarbon_energy_kwh"] or 0.0 for r in results)
 
+    print(f"\n=== Reflection Harness Results ===")
+    print(f"Pass rate: {passed_count}/{len(tasks)} ({100*passed_count//len(tasks) if len(tasks) > 0 else 0}%)")
+    print(f"LLM calls: {total_llm_calls}")
+    print(f"Total duration: {total_duration:.1f}s")
+    
+    # Write summary JSON
     summary = {
         "run_name": args.run_name,
         "model": args.model,
@@ -640,35 +716,23 @@ def main() -> int:
         "duration_seconds": total_duration,
         "output_path": str(run_root),
     }
-
-    results_path = run_root.parent / f"{inner_dir}--reflection--{args.model.replace('/', '--')}.csv"
-    results_path.parent.mkdir(parents=True, exist_ok=True)
-
-    import csv
-    with open(results_path, "w", newline="") as f:
+    
+    with open(summary_json_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    
+    # Write summary CSV
+    with open(summary_csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=summary.keys())
         writer.writeheader()
         writer.writerow(summary)
+    
+    print(f"\nResults saved to:")
+    print(f"  Task CSV: {task_csv_path}")
+    print(f"  Summary JSON: {summary_json_path}")
+    print(f"  Summary CSV: {summary_csv_path}")
 
-    json_path = results_path.with_suffix(".json")
-    with open(json_path, "w") as f:
-        json.dump(summary, f, indent=2)
-
-    tasks_csv_path = results_path.with_stem(results_path.stem + ".tasks")
-    with open(tasks_csv_path, "w", newline="") as f:
-        if results:
-            fieldnames = list(results[0].keys())
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(results)
-
-    print(f"\n=== Reflection Harness Results ===")
-    print(f"Pass rate: {passed_count}/{len(tasks)} ({100*passed_count//len(tasks)}%)")
-    print(f"LLM calls: {total_llm_calls}")
-    print(f"Total duration: {total_duration:.1f}s")
-    print(f"Results saved to: {results_path}")
-
-    return 0 if failed_count == 0 else 1
+    print("Reflection harness completed")
+    return 0
 
 
 if __name__ == "__main__":
