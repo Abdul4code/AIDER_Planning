@@ -12,6 +12,28 @@ This repo intentionally does **not** include SWE-bench, SWE-agent, or any other 
 - `MultiPlan/` – **multi-plan selection variant** (research-grade implementation)
 - `Memory/`, `Decomposition/`, `Reflection/` – placeholders for future variants
 
+## Operationalization Overview
+
+**Five Planning Patterns operationalized with reproducible specifications:**
+
+| Pattern | Operationalization | Model Config | Prompt Strategy | Invocations | Notes |
+|---------|-------------------|--------------|-----------------|-------------|-------|
+| **Baseline** | Single-model error-driven retry loop; no decomposition, memory, or reflection | 1 model | Plain instructions + test errors | 1 per attempt | Gold standard; **never uses AIDER architect/editor** |
+| **Decomposition** | Interleaved planning cycles incrementally decompose task and execute 1-2 actions per cycle | 1 model | Explicit "plan this step" prompts | 2-4 per cycle | Architecture: Planning request → Execution request (alternating) |
+| **MultiPlan** | Generate 4 candidate plans via temperature sampling, evaluate all, select best via majority vote | 1 model | Repeated planning with temperature [0.3, 0.7, 1.0, 1.5] | 4 planning + evaluations | Selection strategy: Passed tests (primary), token cost (tiebreaker) |
+| **Reflection** | Failed solution triggers reflection phase (LLM analyzes failures), then refinement (concrete fixes) | 1 model | Dual-phase: REFLECTION_PROMPT → REFINEMENT_PROMPT | 3 per cycle (generation + reflection + refinement) | Full cycle: p₀ → evaluate → rᵢ → pᵢ₊₁ → retry |
+| **RAG Memory** | Retrieval of relevant past solutions augments task instructions with concrete examples | 1 model | Retrieve top-3 similar solutions, inject as in-context examples | 1 + retrieval cost | No additional model calls; pure prompt augmentation |
+
+**Critical Design Decision: All patterns use AIDER's SINGLE-MODEL CODE MODE, never dual-model architect/editor.**
+
+This is essential because:
+1. Isolates planning pattern effects from AIDER's native architecture
+2. Makes all patterns directly comparable (same model, same task scope)
+3. Keeps token/energy budget constant across conditions
+4. Prevents confounding with encoder reasoning if using o1-style models
+
+See detailed operationalization in each variant's README.
+
 ## Prerequisites
 
 Required tools:

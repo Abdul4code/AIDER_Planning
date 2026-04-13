@@ -28,6 +28,140 @@ Each plan is executed independently with equal time budget.
   - Generates N candidate plans in parallel/sequential mode
   - Tracks individual plan metrics (temperature, passing status, duration, cost)
   - Selects best plan based on test outcomes
+
+## Operationalization: MultiPlan Pattern
+
+**Purpose:** Implement Self-Consistency + Tree-of-Thought via temperature sampling and majority voting.
+
+**Academic Formula:** $P = \{p_1, p_2, ..., p_n\} = \text{plan}(E, g; \Theta, P); p^* = \text{select}(E, g, P; \Theta, F)$
+
+### Model Configuration
+- **Mode:** AIDER single-model code mode (NOT architect/editor dual-model)
+- **Models used:** 1 (e.g., `ollama/qwen2.5-coder:7b-instruct`)
+- **Architect role:** N/A (not used)
+- **Editor role:** N/A (not used)
+- **Rationale:** Single model; multi-plan generation via temperature, not model ensemble
+
+### Prompt Strategy
+
+**Identical task instructions, repeated 4 times with different temperature settings:**
+
+```
+Iteration 1 (temp=0.3):
+  [coder.run(with_message=instructions, temperature=0.3)]
+  → Generate Plan p₁ (deterministic)
+  → Execute and test
+  → Record outcome and metrics
+
+Iteration 2 (temp=0.7):
+  [coder.run(with_message=instructions, temperature=0.7)]
+  → Generate Plan p₂ (moderate variance)
+  → Execute and test
+  → Record outcome and metrics
+
+Iteration 3 (temp=1.0):
+  [coder.run(with_message=instructions, temperature=1.0)]
+  → Generate Plan p₃ (standard)
+  → Execute and test
+  → Record outcome and metrics
+
+Iteration 4 (temp=1.5):
+  [coder.run(with_message=instructions, temperature=1.5)]
+  → Generate Plan p₄ (high exploration)
+  → Execute and test
+  → Record outcome and metrics
+
+Selection Phase:
+  p* = select(P = {p₁, p₂, p₃, p₄})
+  → Majority vote on test outcomes
+  → Return best plan index and winner
+```
+
+**No decomposition, reflection, or memory prompts are added** (same base instruction as Baseline).
+
+### Model Invocation Pattern
+
+```
+Per task:
+  For each temperature in [0.3, 0.7, 1.0, 1.5]:
+    [coder.run(with_message=instructions, temperature=T)]
+    → Generate code
+    → Run unit tests
+    → Record (plan_id, temperature, passed, duration, cost)
+
+Selection:
+  passed_plans = [p for p in plans if p.passed]
+  if passed_plans:
+    p* = min(passed_plans, key=lambda p: p.duration)  # Fastest passing plan
+  else:
+    p* = min(plans, key=lambda p: p.tokens)  # Cheapest failing plan
+  
+  return p*
+```
+
+**Total model invocations per task:** 4 (one per temperature)
+- Sequential execution (not parallel) to avoid resource contention
+- Each receives full time budget independently
+
+### Orchestration Logic
+
+```python
+plan_results = []
+
+# Generate 4 candidate plans
+for temperature in [0.3, 0.7, 1.0, 1.5]:
+    # Phase 1: Generation with this temperature
+    response = coder.run(with_message=instructions, temperature=temperature)
+    
+    # Phase 2: Test evaluation
+    errors = run_unit_tests(...)
+    passed = (errors is None)
+    
+    # Record metrics
+    plan_results.append({
+        'temperature': temperature,
+        'passed': passed,
+        'duration': elapsed_time,
+        'tokens': coder.total_tokens,
+        'cost': coder.total_cost,
+    })
+
+# Phase 3: Selection (majority vote + tiebreaker)
+best_idx, best_plan = select_best_plan(plan_results)
+
+# Report best plan as final result
+# (Do NOT retry: MultiPlan makes a single selection decision)
+```
+
+**Key**: Each plan is independent; selection is deterministic voting, no additional retries.
+
+### Relationship to AIDER's Native Architecture
+
+**Does NOT use architect/editor mode.**
+
+- Architect/editor mode would add *another layer* of planning (top-level decomposition)
+- That would confound this pattern's effect
+- **We isolate to single-model temperature sampling instead**
+- All 4 plans see identical instructions; variance comes purely from LLM's stochastic decoding
+
+### Token and Energy Implications
+
+- **Tokens per task:** 4x baseline (4 independent generations)
+- **Model invocations:** 4 per task (linear with number of temperatures)
+- **Time per task:** ~4x baseline (4 sequential full attempts)
+- **Energy:** ~4x baseline (4 complete LLM passes + tests)
+- **Reasoning overhead:** None (no reasoning models; temperature sampling is decoder-side)
+
+### Reproducibility Checklist
+
+- [ ] Single model specified in `.env`
+- [ ] No architect/editor configuration
+- [ ] Temperature values hardcoded as [0.3, 0.7, 1.0, 1.5]
+- [ ] Selection strategy: passed test outcome → duration tiebreaker → token cost fallback
+- [ ] All 4 plans receive equal time/token budgets
+- [ ] No retries after selection (single fixed decision per task)
+- [ ] Sequential execution (not parallel) to isolate temperature effects
+- [ ] CodeCarbon tracks all 4 model invocations
   - Reports aggregated and per-plan statistics
 
 - **Runner**: `$PROJECT_ROOT/shared/scripts/run_multiplan.sh`
