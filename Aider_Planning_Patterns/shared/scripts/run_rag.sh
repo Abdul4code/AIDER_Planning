@@ -134,13 +134,13 @@ docker run --rm \
 	-v "$(cd "$EXERCISES_MOUNT_SRC" && pwd)":/benchmarks/polyglot-benchmark \
 	-w /aider \
 	"$docker_image" \
-	bash -lc "pip install -e .[dev] codecarbon >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" /workspace/RAG/scripts/rag_harness.py \
+	bash -lc "pip install -e .[dev] codecarbon >/dev/null && pybin=\$(command -v python3 || command -v python) && \"\$pybin\" /workspace/Memory/RAG/scripts/rag_harness.py \
 		--run-name=\"$run_name\" \
 		--model=\"${AIDER_BENCH_MODEL_PREFIX}${OLLAMA_MODEL}\" \
 		--edit-format=\"${AIDER_BENCH_EDIT_FORMAT}\" \
 		--threads=\"${AIDER_BENCH_THREADS}\" \
 		--tries=\"${AIDER_BENCH_TRIES}\" \
-		--num-tests=10 \
+		--num-tests=30 \
 		--shuffle-tasks=\"$AIDER_BENCH_SHUFFLE_TASKS\" \
 		--api-base=\"$OLLAMA_API_FOR_DOCKER\""
 

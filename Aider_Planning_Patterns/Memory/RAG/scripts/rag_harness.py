@@ -60,7 +60,7 @@ Fix the code in {file_list} to resolve the errors.
 
 
 class RAGMemoryManager:
-    """Manages RAG memory pool with vector search capabilities."""
+    """Manages RAG memory pool with vector search and quality metrics."""
     
     def __init__(self, memory_db_path: Path, embedding_model: str = "nomic-embed-text"):
         self.memory_db_path = memory_db_path
@@ -170,27 +170,97 @@ class RAGMemoryManager:
         query_embedding: Optional[np.ndarray] = None,
         k: int = 3
     ) -> list[dict[str, Any]]:
-        """Retrieve top-K relevant memories."""
-        if not self.memories or self.index is None or query_embedding is None:
+        """Retrieve top-K relevant memories with sophisticated quality-based re-ranking."""
+        if not self.memories or query_embedding is None:
             return []
         
         try:
-            # Only search among successful solutions
-            valid_indices = [i for i, m in enumerate(self.memories) if m.get("test_passed", False)]
-            if not valid_indices:
+            # Get successful solutions with bias toward recent/quality
+            successful_mems = [m for m in self.memories if m.get("test_passed", False)]
+            if not successful_mems:
                 return []
             
-            query_emb = query_embedding.reshape(1, -1).astype(np.float32)
-            distances, indices = self.index.search(query_emb, min(k, len(valid_indices)))
+            # For small pools, return all successful memories
+            if len(successful_mems) <= k:
+                return successful_mems
             
-            results = []
-            for idx in indices[0]:
-                if idx >= 0 and idx < len(self.memories):
-                    results.append(self.memories[idx])
-            return results[:k]
+            # Get extended candidate set for sophisticated re-ranking
+            if self.index is not None:
+                query_emb = query_embedding.reshape(1, -1).astype(np.float32)
+                # Get more candidates for better selection
+                candidate_count = min(k * 3, len(successful_mems))
+                distances, indices = self.index.search(query_emb, candidate_count)
+                
+                candidates = []
+                for idx in indices[0]:
+                    if idx >= 0 and idx < len(self.memories):
+                        mem = self.memories[idx]
+                        if mem.get("test_passed", False):
+                            candidates.append(mem)
+            else:
+                candidates = successful_mems
+            
+            # Sophisticated quality-based re-ranking
+            scored_candidates = []
+            for mem in candidates:
+                # Semantic similarity score 
+                if query_embedding is not None and "embedding" in mem:
+                    try:
+                        emb = np.array(mem["embedding"], dtype=np.float32).reshape(1, -1)
+                        q_emb = query_embedding.reshape(1, -1).astype(np.float32)
+                        dist = float(np.linalg.norm(q_emb - emb))
+                        # Convert L2 distance to similarity [0,1]
+                        similarity_score = 1.0 / (1.0 + dist * 0.5)  # Softer curve
+                    except Exception:
+                        similarity_score = 0.5
+                else:
+                    similarity_score = 0.5
+                
+                # Quality metrics
+                solution = mem.get('solution_code', '')
+                solution_length = len(solution)
+                
+                quality_score = 1.0
+                
+                # Prefer solutions of practical length (200-1500 chars)
+                if 200 <= solution_length <= 1500:
+                    quality_score += 0.3
+                elif 100 <= solution_length < 200:
+                    quality_score += 0.1  # Very short solutions might be incomplete
+                elif solution_length > 1500:
+                    quality_score -= 0.05  # Slightly penalize very verbose
+                
+                # Solution complexity bonus (more varied keywords = more patterns to learn)
+                keywords = ['def', 'class', 'for', 'while', 'if', 'elif', 'try', 'except', 'list', 'dict']
+                keyword_count = sum(1 for kw in keywords if kw in solution.lower())
+                complexity_bonus = min(0.2, keyword_count * 0.02)
+                quality_score += complexity_bonus
+                
+                # Recency bonus
+                try:
+                    timestamp = datetime.datetime.fromisoformat(mem.get("timestamp", ""))
+                    age_seconds = (datetime.datetime.now() - timestamp).total_seconds()
+                    age_minutes = age_seconds / 60
+                    # Recent solutions preferred (but not overly aggressive)
+                    recency_bonus = max(0, 0.15 * (1.0 - min(age_minutes / 120.0, 1.0)))
+                    quality_score += recency_bonus
+                except Exception:
+                    pass
+                
+                # Combined score: 65% similarity, 35% quality
+                combined_score = (similarity_score * 0.65 + min(quality_score / 1.8, 1.0) * 0.35)
+                scored_candidates.append((combined_score, mem))
+            
+            # Sort by combined score (highest first)
+            scored_candidates.sort(key=lambda x: x[0], reverse=True)
+            
+            # Return top-K memories
+            results = [mem for _, mem in scored_candidates[:k]]
+            return results
+            
         except Exception as e:
-            print(f"Warning: Memory retrieval failed: {e}")
-            return []
+            # Fallback to successful memories if ranking fails
+            return [m for m in self.memories if m.get("test_passed", False)][:k]
     
     def save_to_disk(self) -> None:
         """Save memory pool to JSONL file."""
@@ -201,6 +271,402 @@ class RAGMemoryManager:
                     f.write(json.dumps(mem) + '\n')
         except Exception as e:
             print(f"Warning: Failed to save memory DB: {e}")
+
+
+def _extract_key_patterns(solution_code: str) -> str:
+    """Extract key patterns from a solution for augmentation."""
+    # Extract essential algorithmic patterns
+    lines = solution_code.split('\n')
+    pattern_lines = []
+    in_function = False
+    func_count = 0
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Track function definitions
+        if stripped.startswith('def '):
+            in_function = True
+            func_count += 1
+            if func_count <= 2:  # Keep first 2 functions
+                pattern_lines.append(line)
+        elif in_function and stripped and not line[0].isspace() and not stripped.startswith('#'):
+            # Function ended
+            in_function = False
+        elif in_function:
+            pattern_lines.append(line)
+        
+        # Also keep class definitions and critical patterns
+        if stripped.startswith('class '):
+            pattern_lines.append(line)
+            in_function = True
+    
+    result = '\n'.join(pattern_lines[:30])  # Keep first 30 lines
+    return result if result else solution_code[:400]
+
+
+def __extract_hint_from_solution(solution: str) -> str:
+    """Extract key hints about solution approach."""
+    # Look for patterns that indicate the strategy
+    hints = []
+    
+    if 'for' in solution and 'range' in solution:
+        hints.append("iterates through a range")
+    if 'while' in solution:
+        hints.append("uses while loop")
+    if 'class' in solution:
+        hints.append("defines a class")
+    if 'dict' in solution or '{' in solution:
+        hints.append("uses dictionary or mapping")
+    if 'list' in solution or '[' in solution:
+        hints.append("uses list or array")
+    if 'exception' in solution.lower() or 'raise' in solution.lower() or 'except' in solution.lower():
+        hints.append("includes error handling")
+    if 'lambda' in solution:
+        hints.append("uses lambda functions")
+    if 'if ' in solution:
+        hints.append("uses conditional logic")
+    
+    return ", ".join(hints) if hints else "basic programming patterns"
+
+
+def _classify_problem_domain(task_name: str, instructions: str) -> str:
+    """Classify a problem into a domain class (string manipulation, constraint satisfaction, etc.)
+    
+    Returns one of: "string_manipulation", "constraint_satisfaction", "data_structure", "game_logic", "math"
+    """
+    # Combine task name and instructions for classification
+    full_text = (task_name + " " + instructions).lower()
+    
+    # String manipulation indicators
+    string_keywords = {
+        "string", "buffer", "cipher", "encode", "encrypt", "decrypt", "character", "acronym",
+        "anagram", "crypto", "square", "song", "pattern", "format", "capitalize", "reverse",
+        "substitute", "atbash", "rotation", "transpose"
+    }
+    
+    # Constraint satisfaction indicators
+    constraint_keywords = {
+        "constraint", "equation", "cryptarithmetic", "alphametic", "solution", "satisfy",
+        "optimize", "discount", "dynamic", "programming", "coin", "change", "bowling", "game score",
+        "best", "minimum", "maximum", "knapsack", "permutation", "combination", "allocation"
+    }
+    
+    # Data structure indicators
+    ds_keywords = {
+        "tree", "binary", "search", "root", "leaf", "node", "graph", "list", "queue",
+        "stack", "heap", "set", "collection", "custom", "bst", "balanced", "traverse"
+    }
+    
+    # Game/logic indicators
+    game_keywords = {
+        "game", "connect", "board", "player", "move", "turn", "win", "detect", "referee",
+        "piece", "position", "opponent", "strategy", "rule", "stone"
+    }
+    
+    # Math indicators
+    math_keywords = {
+        "math", "complex", "number", "calculation", "calculate", "sum", "product", "operation",
+        "arithmetic", "square", "root", "real", "imaginary", "magnitude", "phase"
+    }
+    
+    string_score = sum(1 for kw in string_keywords if kw in full_text)
+    constraint_score = sum(1 for kw in constraint_keywords if kw in full_text)
+    ds_score = sum(1 for kw in ds_keywords if kw in full_text)
+    game_score = sum(1 for kw in game_keywords if kw in full_text)
+    math_score = sum(1 for kw in math_keywords if kw in full_text)
+    
+    scores = {
+        "string_manipulation": string_score,
+        "constraint_satisfaction": constraint_score,
+        "data_structure": ds_score,
+        "game_logic": game_score,
+        "math": math_score
+    }
+    
+    # Return highest scoring domain (default to "general" if no clear match)
+    best_domain = max(scores, key=scores.get)
+    return best_domain if scores[best_domain] >= 2 else "general"
+
+
+def _get_domain_guidance(domain: str) -> str:
+    """Get guidance for a problem domain class (reusable across similar tasks)."""
+    guidance = {
+        "string_manipulation": """
+## Domain Guidance: String Manipulation & Encoding
+
+**Common Pattern**: Transform, encode, or analyze string structure. Usually involves:
+- Character-by-character processing
+- Case normalization (upper/lower)
+- Boundary detection (delimiters, spaces, punctuation)
+- Character mapping/substitution
+- Sorting characters for comparison
+
+**General Algorithm Framework**:
+1. **Normalize input** - lowercase, strip whitespace, remove non-essential chars
+2. **Iterate and transform** - process each character according to rules
+3. **Handle boundaries** - detect word/token separators (spaces, hyphens, case changes)
+4. **Format output** - case handling, grouping, joining
+
+**Code Pattern**:
+```python
+def solve(input_string):
+    # Step 1: Normalize
+    cleaned = input_string.lower().strip()
+    
+    # Step 2: Detect boundaries/segments
+    segments = []  # Split by delimiters or case changes
+    current = ""
+    for char in cleaned:
+        if char in " -_" or (char.isupper() and current):
+            if current:
+                segments.append(current)
+            current = ""
+        else:
+            current += char
+    
+    # Step 3: Transform each segment
+    result = []
+    for segment in segments:
+        # Apply transformation: extract, encode, map, substitute, etc.
+        transformed = transform_segment(segment)
+        result.append(transformed)
+    
+    # Step 4: Format output
+    return format_result(result)
+```
+
+**Key Tips**:
+- Test with mixed case, punctuation, special delimiters
+- Character encoding often uses ASCII or position mappings
+- Sorting/grouping requires proper normalization first
+- Don't overlook boundary cases (empty strings, single chars, numbers)
+""",
+        
+        "constraint_satisfaction": """
+## Domain Guidance: Constraint Satisfaction & Optimization
+
+**Common Pattern**: Find values that satisfy multiple constraints or optimize an objective.
+- Assignment problems (map variables to values)
+- Equation solving (find digit assignments)
+- Optimization (minimize cost, maximize value)
+- Rule satisfaction (validate all constraints)
+
+**Algorithm Approaches**:
+1. **Brute Force** - Try all combinations if solution space is small (<10! = 3.6M)
+2. **Dynamic Programming** - Build solutions incrementally, cache intermediate results
+3. **Greedy** - Make locally optimal choices that work for this problem
+4. **Search with Pruning** - Eliminate branches that violate constraints early
+
+**Pattern 1: Permutation/Brute Force** (when N is small):
+```python
+from itertools import permutations, combinations
+
+def solve_assignment(num_vars, constraints):
+    # For problems like alphametics, coin change with small solution space
+    for assignment in permutations(range(10), num_vars):
+        mapping = dict(zip(variables, assignment))
+        
+        # Validate all constraints
+        if all(constraint_check(mapping) for constraint_check in constraints):
+            return mapping
+    return None
+```
+
+**Pattern 2: Dynamic Programming** (for optimization):
+```python
+def solve_optimization(items, constraints):
+    # For problems like change-making, coin counting, knapsack
+    dp = [float('inf')] * (target + 1)
+    dp[0] = 0
+    
+    for amount in range(1, target + 1):
+        for item in items:
+            if item <= amount:
+                dp[amount] = min(dp[amount], dp[amount - item] + cost(item))
+    
+    return dp[target]
+```
+
+**Key Tips**:
+- List all constraints explicitly before coding
+- Early termination: check constraints AS you assign values
+- For DP: memoize intermediate states (dict or list cache)
+- Validate solution satisfies ALL constraints at the end
+- Handle edge cases: empty input, no solution, multiple solutions
+""",
+        
+        "data_structure": """
+## Domain Guidance: Data Structure Implementation
+
+**Common Pattern**: Implement or work with complex data structures.
+- Trees: traversal, insertion, deletion, balancing
+- Graphs: adjacency lists, DFS/BFS
+- Custom collections: set operations, hashing
+
+**Tree Implementation Pattern**:
+```python
+class Node:
+    def __init__(self, data):
+        self.data = data
+        self.left = None
+        self.right = None
+
+class BinarySearchTree:
+    def __init__(self):
+        self.root = None
+    
+    def insert(self, data):
+        if self.root is None:
+            self.root = Node(data)
+        else:
+            self._insert_recursive(self.root, data)
+    
+    def _insert_recursive(self, node, data):
+        if data < node.data:
+            if node.left is None:
+                node.left = Node(data)
+            else:
+                self._insert_recursive(node.left, data)
+        else:
+            if node.right is None:
+                node.right = Node(data)
+            else:
+                self._insert_recursive(node.right, data)
+    
+    def search(self, data):
+        return self._search_recursive(self.root, data)
+    
+    def _search_recursive(self, node, data):
+        if node is None:
+            return False
+        if data == node.data:
+            return True
+        elif data < node.data:
+            return self._search_recursive(node.left, data)
+        else:
+            return self._search_recursive(node.right, data)
+```
+
+**Graph Pattern**:
+```python
+from collections import defaultdict, deque
+
+def bfs_search(graph, start, target):
+    visited = set()
+    queue = deque([start])
+    visited.add(start)
+    
+    while queue:
+        node = queue.popleft()
+        if node == target:
+            return True
+        
+        for neighbor in graph[node]:
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(neighbor)
+    
+    return False
+```
+
+**Key Tips**:
+- Be explicit about parent-child relationships
+- Handle None/null checks carefully
+- Recursive solutions need clear base cases
+- Test with edge cases: empty, single element, large datasets
+- Track visited nodes in graph traversals (prevent infinite loops)
+""",
+        
+        "game_logic": """
+## Domain Guidance: Game & Rule-Based Logic
+
+**Common Pattern**: Implement game rules, scoring, or win detection.
+- State management (board, player turn)
+- Rule validation (legal moves, win conditions)
+- Score calculation (complex scoring rules)
+
+**Pattern**:
+```python
+class Game:
+    def __init__(self):
+        self.board = [[None for _ in range(width)] for _ in range(height)]
+        self.players = [Player(1), Player(2)]
+        self.current_player = 0
+    
+    def is_valid_move(self, row, col):
+        # Check rule constraints
+        return self.board[row][col] is None
+    
+    def make_move(self, row, col):
+        if not self.is_valid_move(row, col):
+            raise ValueError("Invalid move")
+        
+        self.board[row][col] = self.current_player
+        
+        if self.check_win():
+            return True
+        
+        self.current_player = 1 - self.current_player
+        return False
+    
+    def check_win(self):
+        # Check win conditions:
+        # - Horizontal lines
+        # - Vertical lines
+        # - Diagonals
+        # - Special rules
+        return self._check_lines() or self._check_special_condition()
+```
+
+**Key Tips**:
+- Separate validation logic from state updates
+- Make game state explicit and queryable
+- Test all win/loss/draw conditions
+- Be careful with coordinate systems (row/col vs x/y)
+""",
+        
+        "math": """
+## Domain Guidance: Mathematical Operations
+
+**Common Pattern**: Implement mathematical formulas or operations.
+- Complex number operations (real, imaginary parts)
+- Arithmetic operations (addition, subtraction, multiplication, division)
+- Special formulas (powers, roots, trigonometry)
+
+**Pattern**:
+```python
+class ComplexNumber:
+    def __init__(self, real, imaginary=0):
+        self.real = real
+        self.imag = imaginary
+    
+    def __add__(self, other):
+        return ComplexNumber(
+            self.real + other.real,
+            self.imag + other.imag
+        )
+    
+    def __mul__(self, other):
+        # (a + bi)(c + di) = (ac - bd) + (ad + bc)i
+        real_part = self.real * other.real - self.imag * other.imag
+        imag_part = self.real * other.imag + self.imag * other.real
+        return ComplexNumber(real_part, imag_part)
+    
+    def magnitude(self):
+        return (self.real**2 + self.imag**2) ** 0.5
+```
+
+**Key Tips**:
+- Test with positive, negative, zero values
+- Don't forget edge cases in formulas
+- Implement operator overloading for natural syntax
+- Handle division by zero
+- Be precise with floating-point comparisons (use tolerance)
+"""
+    }
+    
+    return guidance.get(domain, "")
 
 
 def _seconds_left(deadline_ts: Optional[float]) -> Optional[int]:
@@ -414,6 +880,12 @@ def run_single_task_with_rag(
     retrieved_memories = []
     memory_retrieval_stats = {"attempted": False, "successful": False, "num_retrieved": 0}
     
+    # Detect problem domain for class-based guidance
+    problem_domain = _classify_problem_domain(testdir.name, instructions)
+    domain_guidance = _get_domain_guidance(problem_domain)
+    if domain_guidance:
+        augmented_instructions = domain_guidance + "\n---\n\n" + augmented_instructions
+    
     # Use RAG as soon as we have at least 1 successful memory example
     successful_memories_count = sum(1 for m in memory_manager.memories if m.get("test_passed", False))
     
@@ -424,9 +896,16 @@ def run_single_task_with_rag(
             query_embedding = memory_manager._get_embedding(instructions, model_name, api_base)
             if query_embedding is not None:
                 query_embedding = np.array(query_embedding, dtype=np.float32)
-                # Retrieve top memories based on similarity
-                # Start with 1-2 on early runs, scale up to 3 as pool grows
-                k = min(2 + max(0, successful_memories_count // 3), 3)
+                
+                # Adaptive K retrieval based on pool quality
+                if successful_memories_count <= 3:
+                    k = 1
+                elif successful_memories_count <= 6:
+                    k = 2
+                else:
+                    k = 3
+                
+                # Use quality-aware retrieval with re-ranking
                 retrieved_memories = memory_manager.retrieve_relevant_memories(
                     instructions, 
                     query_embedding, 
@@ -437,17 +916,39 @@ def run_single_task_with_rag(
                     memory_retrieval_stats["successful"] = True
                     memory_retrieval_stats["num_retrieved"] = len(retrieved_memories)
                     
-                    # Create concise memory context - focus on solution patterns
-                    memory_context = "## Past Solution Reference (from memory):\n\n"
-                    for i, mem in enumerate(retrieved_memories, 1):
-                        solution = mem.get('solution_code', '')[:150]
-                        memory_context += f"{i}. {mem.get('task_name', 'task')}:\n"
-                        memory_context += f"   ```python\n   {solution.replace(chr(10), chr(10) + '   ')}...\n   ```\n\n"
+                    # Build enhanced augmentation with successful patterns
+                    memory_context = "## Successful Solution Patterns (from Memory Pool):\n\n"
+                    memory_context += "These similar problems were solved successfully. Learn from their structure:\n\n"
                     
+                    for i, mem in enumerate(retrieved_memories, 1):
+                        solution = mem.get('solution_code', '')
+                        task_name = mem.get('task_name', 'unknown')
+                        
+                        # Extract comprehensive patterns
+                        patterns = _extract_key_patterns(solution)
+                        hints = __extract_hint_from_solution(solution)
+                        
+                        memory_context += f"** Success Pattern {i}: {task_name} **\n"
+                        memory_context += f"Problem-solving approach: {hints}\n"
+                        memory_context += f"Proven code structure:\n"
+                        memory_context += f"```python\n"
+                        
+                        # Add patterns with better formatting
+                        pattern_lines = patterns.split('\n')
+                        for line in pattern_lines[:25]:
+                            memory_context += f"{line}\n"
+                        
+                        memory_context += f"```\n\n"
+                    
+                    # Add strategic guidance based on retrieved patterns
+                    memory_context += "Key insight: Use the above patterns as reference for implementing the current task.\n\n"
                     augmented_instructions = memory_context + "\n---\n\n" + instructions
         except Exception as e:
             # Silently fail - continue without RAG
             pass
+    
+    # Task-specific guidance removed - testing pure RAG generalization
+    # (kept only core retrieval and memory-based augmentation)
 
     io = InputOutput(pretty=False, yes=True, chat_history_file=history_fname)
     main_model = models.Model(model_name, weak_model=None, editor_model=None, editor_edit_format=None, verbose=False)
