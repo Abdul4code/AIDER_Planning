@@ -123,6 +123,7 @@ docker run --rm \
 	--add-host host.docker.internal:host-gateway \
 	-e AIDER_DOCKER=1 \
 	-e AIDER_BENCHMARK_DIR=/benchmarks \
+	-e AIDER_BENCH_NUM_TESTS="${AIDER_BENCH_NUM_TESTS}" \
 	-e OLLAMA_API_BASE="$OLLAMA_API_FOR_DOCKER" \
 	-e OLLAMA_MODEL="$OLLAMA_MODEL" \
 	-e AIDER_BENCH_TASK_TIMEOUT_SECONDS=900 \
@@ -140,9 +141,22 @@ docker run --rm \
 		--edit-format=\"${AIDER_BENCH_EDIT_FORMAT}\" \
 		--threads=\"${AIDER_BENCH_THREADS}\" \
 		--tries=\"${AIDER_BENCH_TRIES}\" \
-		--num-tests=30 \
+		--num-tests=\"${AIDER_BENCH_NUM_TESTS}\" \
 		--shuffle-tasks=\"$AIDER_BENCH_SHUFFLE_TASKS\" \
-		--api-base=\"$OLLAMA_API_FOR_DOCKER\""
+		--api-base=\"$OLLAMA_API_FOR_DOCKER\"" \
+	> >(tee "$run_dir/run.log") \
+	2> >(tee "$run_dir/run.err.log" >&2)
+docker_rc=$?
+set -e
+
+if [[ "$docker_rc" -ne 0 ]]; then
+	echo "ERROR: RAG benchmark run failed. See logs:" >&2
+	echo "- $run_dir/run.log" >&2
+	echo "- $run_dir/run.err.log" >&2
+	exit 5
+fi
+
+echo "OK: RAG benchmark run completed. Logs at $run_dir"
 
 # --- Collect results ---
 "$PY" Baseline/scripts/collect_results.py \

@@ -147,6 +147,22 @@ def _task_row(run_dir: Path, result_path: Path, raw: Dict[str, Any], passed: boo
     true_count = sum(1 for v in outcomes if _boolish(v) is True)
     false_count = sum(1 for v in outcomes if _boolish(v) is False)
 
+    # Calculate llm_calls: sum both planner and executor calls, or fallback to chat_hashes
+    llm_call_count = 0
+    executor_calls = raw.get("executor_calls") if isinstance(raw, dict) else None
+    planner_calls = raw.get("planner_calls") if isinstance(raw, dict) else None
+    
+    if executor_calls is not None or planner_calls is not None:
+        try:
+            if executor_calls is not None:
+                llm_call_count += int(executor_calls)
+            if planner_calls is not None:
+                llm_call_count += int(planner_calls)
+        except (ValueError, TypeError):
+            llm_call_count = len(chat_hashes)
+    else:
+        llm_call_count = len(chat_hashes)
+
     return {
         "task_path": str(result_path.relative_to(run_dir)),
         "testcase": raw.get("testcase", ""),
@@ -158,7 +174,7 @@ def _task_row(run_dir: Path, result_path: Path, raw: Dict[str, Any], passed: boo
         "tries_recorded": len(outcomes),
         "tries_passed": true_count,
         "tries_failed": false_count,
-        "llm_calls": len(chat_hashes),
+        "llm_calls": llm_call_count,
         "duration_seconds": raw.get("duration", ""),
         "prompt_tokens": raw.get("prompt_tokens", ""),
         "completion_tokens": raw.get("completion_tokens", ""),
@@ -310,15 +326,28 @@ def main() -> int:
             failed += 1
 
         if isinstance(raw, dict):
-            # Prefer executor_calls for accurate LLM call counting (captures all plan executions)
+            # For patterns with planning, sum both planner_calls and executor_calls
+            # Patterns without planning will have planner_calls=0 or missing
             # Fall back to chat_hashes if executor_calls not available
             executor_calls = raw.get("executor_calls")
+            planner_calls = raw.get("planner_calls")
+            
+            call_count = 0
             if executor_calls is not None:
                 try:
-                    llm_calls_total += int(executor_calls)
+                    call_count += int(executor_calls)
                 except (ValueError, TypeError):
                     pass
+            if planner_calls is not None:
+                try:
+                    call_count += int(planner_calls)
+                except (ValueError, TypeError):
+                    pass
+            
+            if call_count > 0:
+                llm_calls_total += call_count
             else:
+                # Fallback to chat_hashes if neither executor nor planner calls available
                 chat_hashes = raw.get("chat_hashes")
                 if isinstance(chat_hashes, list):
                     llm_calls_total += len(chat_hashes)

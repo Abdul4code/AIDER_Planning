@@ -638,7 +638,8 @@ def run_single_task(
             if not cycle_actions:
                 if not should_continue:
                     break
-                break
+                # If should_continue is True, loop continues to next cycle to ask planner again
+                continue
 
             for action_idx, action_instruction in enumerate(cycle_actions, start=1):
                 remaining_seconds = _seconds_left(task_deadline_ts)
@@ -836,7 +837,17 @@ def main() -> int:
     ap.add_argument("--num-tests", type=int, default=-1)
     ap.add_argument("--num-ctx", type=int, default=0)
     ap.add_argument("--exercises-dir", default="polyglot-benchmark")
-    ap.add_argument("--arch-max-steps", type=int, default=3)
+    
+    # Read default arch_max_steps from environment, default to 4 if not set
+    default_arch_max_steps = 4
+    env_arch_max = os.environ.get("AIDER_BENCH_DECOMP_MAX_STEPS", "").strip()
+    if env_arch_max:
+        try:
+            default_arch_max_steps = int(env_arch_max)
+        except (ValueError, TypeError):
+            default_arch_max_steps = 4
+    
+    ap.add_argument("--arch-max-steps", type=int, default=default_arch_max_steps)
     ap.add_argument("--shuffle-tasks", type=int, default=1, choices=[0, 1])
     args = ap.parse_args()
 

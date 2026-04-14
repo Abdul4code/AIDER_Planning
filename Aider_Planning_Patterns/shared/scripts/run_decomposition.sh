@@ -114,7 +114,7 @@ model_arg="${AIDER_BENCH_MODEL_PREFIX}${OLLAMA_MODEL}"
 exercises_dir="$AIDER_BENCH_EXERCISES_SUBDIR"
 
 decomp_tries="${AIDER_BENCH_DECOMP_TRIES:-1}"
-decomp_arch_max_steps="${AIDER_BENCH_DECOMP_ARCH_MAX_STEPS:-1}"
+decomp_arch_max_steps="${AIDER_BENCH_DECOMP_MAX_STEPS:-4}"
 decomp_task_timeout_seconds="${AIDER_BENCH_DECOMP_TASK_TIMEOUT_SECONDS:-900}"
 decomp_llm_timeout="${AIDER_BENCH_DECOMP_LLM_TIMEOUT:-60}"
 decomp_retry_timeout="${AIDER_BENCH_DECOMP_RETRY_TIMEOUT:-30}"
