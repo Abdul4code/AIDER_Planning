@@ -56,11 +56,50 @@ The tests are correct, don't try and change them.
 Fix the code in {file_list} to resolve the errors.
 """
 
-REFLECTION_PROMPT = """
-## Self-Reflection on Test Failures
+PLAN_CRITIQUE_PROMPT = """
+## Critique Your Implementation Plan
 
-You just attempted to solve a programming task but there were test failures. 
-Analyze what went wrong and why.
+Before running tests, analyze your proposed code for potential issues.
+
+**Your task:**
+1. **Code review**: Walk through your implementation line by line
+2. **Identify potential issues**:
+   - Does it handle all edge cases mentioned in the requirements?
+   - Are there off-by-one errors or boundary condition bugs?
+   - Does it correctly parse/process the input format?
+   - Are data types handled correctly?
+   - Does the algorithm match the problem description?
+3. **Specific concerns**: List 3-5 concrete issues your code might have
+4. **Mentally test**: Trace through your code with a test example
+5. **Critique summary**: What needs fixing or improving?
+
+Be critical and thorough. Focus on finding bugs before execution.
+"""
+
+REFINEMENT_PROMPT = """
+## Refine Your Code Based on Critique
+
+Based on your analysis of potential issues, now improve your code:
+
+**Step 1: Acknowledge the issues**
+- Restate the specific issues you identified in the code review
+
+**Step 2: Plan the fixes**
+- For each issue, describe exactly what code changes fix it
+- Explain why the change addresses the problem
+
+**Step 3: Implement improvements**
+- Refactor the code to fix all identified issues
+- Ensure fixes are complete and consistent
+- Re-check the revised code against edge cases
+
+Now update the code to implement all improvements.
+"""
+
+REFLECTION_ON_FAILURE_PROMPT = """
+## Reflect on Test Failures
+
+Your code did not pass the tests. Analyze what went wrong and why.
 
 **Your task:**
 1. **Identify the exact failure**: What does the error message tell you?
@@ -74,28 +113,6 @@ Analyze what went wrong and why.
 5. **Concrete fix strategy**: What specific code changes will fix each bug?
 
 Focus on being precise and actionable. Identify the exact line(s) of code that need changing.
-"""
-
-REFINEMENT_PROMPT = """
-## Refined Implementation Plan
-
-Based on your reflection on the failures, create a detailed refinement plan:
-
-**Step 1: Acknowledge the issue**
-- Restate the bugs you identified
-- Explain why each bug causes the tests to fail
-
-**Step 2: Plan the fix**
-- For each bug, describe exactly how to fix it
-- Include any algorithm changes needed
-- Consider edge cases and special conditions
-
-**Step 3: Implementation**
-- Apply all necessary fixes to the code
-- Ensure your changes are complete and consistent
-- Test mentally against the known failure cases
-
-Now update the code to implement all the fixes.
 """
 
 
@@ -345,6 +362,7 @@ def run_single_task(
 
     reflection_count = 0
     max_reflections = tries - 1  # Reserve one try for final attempt
+    plan_reflection_cycles = 2   # Number of pure plan reflection cycles before first execution
 
     for attempt in range(tries):
         remaining_seconds = _seconds_left(task_deadline_ts)
@@ -357,20 +375,72 @@ def run_single_task(
             task_timed_out = True
             break
         main_model.timeout = call_timeout
-        # Propagate the per-call timeout down to the model client
         models.request_timeout = call_timeout
 
         start = datetime.datetime.now().timestamp()
 
-        response = coder.run(with_message=current_instructions, preproc=False)
+        # ===== PLAN-BASED REFLECTION PHASE (BEFORE EXECUTION) =====
+        # On the first attempt, generate initial code, then do pure plan reflection cycles
+        if attempt == 0:
+            # Step 1: Generate initial code/plan
+            response = coder.run(with_message=current_instructions, preproc=False)
+            duration += datetime.datetime.now().timestamp() - start
+            pattern = r"^[+]? *[#].* [.][.][.] "
+            lazy_comments += len(re.findall(pattern, response or "", re.MULTILINE))
 
-        duration += datetime.datetime.now().timestamp() - start
-        pattern = r"^[+]? *[#].* [.][.][.] "
-        lazy_comments += len(re.findall(pattern, response or "", re.MULTILINE))
+            if coder.last_keyboard_interrupt:
+                raise KeyboardInterrupt
+            
+            # Step 2-3: Do multiple reflection-refinement cycles on the plan (before execution)
+            for cycle in range(plan_reflection_cycles):
+                with history_fname.open("a", encoding="utf-8") as fh:
+                    fh.write(f"\n\n## Plan Reflection Cycle {cycle + 1}\n\n")
+                
+                remaining_seconds = _seconds_left(task_deadline_ts)
+                call_timeout = _effective_call_timeout(remaining_seconds, llm_timeout)
+                if call_timeout is not None:
+                    main_model.timeout = call_timeout
+                
+                # Step 2: Critique the current code/plan (WITHOUT execution)
+                critique_start = datetime.datetime.now().timestamp()
+                try:
+                    critique_response = coder.chat(with_message=PLAN_CRITIQUE_PROMPT)
+                except Exception:
+                    critique_response = None
+                duration += datetime.datetime.now().timestamp() - critique_start
+                
+                if critique_response:
+                    with history_fname.open("a", encoding="utf-8") as fh:
+                        fh.write(f"\n### Plan Critique:\n\n{critique_response}\n\n")
+                
+                # Step 3: Refine the code based on critique
+                refinement_msg = (
+                    f"{REFINEMENT_PROMPT}\n\n"
+                    f"Original task:\n{instructions}\n\n"
+                    f"Your analysis:\n{critique_response}"
+                )
+                refinement_msg += INSTRUCTIONS_ADDENDUM.format(file_list=file_list)
+                
+                refine_start = datetime.datetime.now().timestamp()
+                response = coder.run(with_message=refinement_msg, preproc=False)
+                duration += datetime.datetime.now().timestamp() - refine_start
+                
+                if coder.last_keyboard_interrupt:
+                    raise KeyboardInterrupt
+                
+                pattern = r"^[+]? *[#].* [.][.][.] "
+                lazy_comments += len(re.findall(pattern, response or "", re.MULTILINE))
+        else:
+            # Subsequent attempts: use error-driven feedback
+            response = coder.run(with_message=current_instructions, preproc=False)
+            duration += datetime.datetime.now().timestamp() - start
+            pattern = r"^[+]? *[#].* [.][.][.] "
+            lazy_comments += len(re.findall(pattern, response or "", re.MULTILINE))
 
-        if coder.last_keyboard_interrupt:
-            raise KeyboardInterrupt
-
+            if coder.last_keyboard_interrupt:
+                raise KeyboardInterrupt
+        
+        # ===== EXECUTION PHASE (AFTER PLAN REFINEMENT) =====
         try:
             remaining_seconds = _seconds_left(task_deadline_ts)
             if remaining_seconds is not None and remaining_seconds <= 0:
@@ -395,44 +465,39 @@ def run_single_task(
             syntax_errors += sum(1 for line in err_lines if line.startswith("SyntaxError"))
             indentation_errors += sum(1 for line in err_lines if line.startswith("IndentationError"))
 
-            # Reflection phase: Generate self-reflection and refinement feedback
+            # ===== FAILURE-DRIVEN REFLECTION PHASE (AFTER EXECUTION FAILS) =====
+            # If tests fail and we have reflection cycles left, reflect on the failure
             if reflection_count < max_reflections:
                 reflection_count += 1
                 
-                # Log reflection step
                 with history_fname.open("a", encoding="utf-8") as fh:
-                    fh.write(f"\n\n## Reflection Cycle {reflection_count}\n\n")
-                
-                # Generate self-reflection on the errors
-                reflect_prompt = REFLECTION_PROMPT + "\n\nTest errors:\n```\n" + errors + "\n```"
+                    fh.write(f"\n\n## Failure Reflection Cycle {reflection_count}\n\n")
                 
                 remaining_seconds = _seconds_left(task_deadline_ts)
                 call_timeout = _effective_call_timeout(remaining_seconds, llm_timeout)
                 if call_timeout is not None:
                     main_model.timeout = call_timeout
                 
-                # Use sendchat to get reflection (don't modify code)
+                # Reflect on the actual test failure
+                failure_reflect_prompt = REFLECTION_ON_FAILURE_PROMPT + "\n\nTest errors:\n```\n" + errors + "\n```"
+                
                 reflect_start = datetime.datetime.now().timestamp()
                 try:
-                    reflection_response = coder.chat(with_message=reflect_prompt)
+                    failure_reflection = coder.chat(with_message=failure_reflect_prompt)
                 except Exception:
-                    reflection_response = None
+                    failure_reflection = None
                 duration += datetime.datetime.now().timestamp() - reflect_start
                 
-                if reflection_response:
+                if failure_reflection:
                     with history_fname.open("a", encoding="utf-8") as fh:
-                        fh.write(f"\n### LLM Reflection:\n\n{reflection_response}\n\n")
+                        fh.write(f"\n### Failure Analysis:\n\n{failure_reflection}\n\n")
                 
-                # Generate refinement message combining original task + reflection + errors
+                # Generate refinement based on failure analysis
                 refinement_msg = (
                     f"{REFINEMENT_PROMPT}\n\n"
-                    f"Original task:\n{instructions}\n\n"
-                    f"Test errors:\n```\n{errors}\n```"
+                    f"Test errors:\n```\n{errors}\n```\n\n"
+                    f"Your analysis:\n{failure_reflection}"
                 )
-                
-                if reflection_response:
-                    refinement_msg += f"\n\nYour previous analysis:\n{reflection_response}"
-                
                 current_instructions = refinement_msg
                 current_instructions += TEST_FAILURES.format(file_list=file_list)
                 if extra_instructions:
@@ -441,7 +506,7 @@ def run_single_task(
                 if task_timed_out:
                     break
             else:
-                # No more reflections, use raw error feedback
+                # No more reflection cycles; final attempt with raw error
                 current_instructions = errors
                 current_instructions += TEST_FAILURES.format(file_list=file_list)
                 if extra_instructions:
