@@ -258,6 +258,8 @@ def run_single_task(
 
     if llm_timeout and llm_timeout > 0:
         main_model.timeout = llm_timeout
+        # Ensure the lower-level model client uses the same request timeout
+        models.request_timeout = llm_timeout
 
     actual_edit_format = edit_format or main_model.edit_format
     # IMPORTANT: Only pass solution files to coder, never test/example files.
@@ -301,6 +303,8 @@ def run_single_task(
             task_timed_out = True
             break
         main_model.timeout = call_timeout
+        # Propagate per-call timeout to the model client so requests don't hang
+        models.request_timeout = call_timeout
 
         start = datetime.datetime.now().timestamp()
 

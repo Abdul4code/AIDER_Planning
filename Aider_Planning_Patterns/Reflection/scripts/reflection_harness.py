@@ -312,6 +312,8 @@ def run_single_task(
 
     if llm_timeout and llm_timeout > 0:
         main_model.timeout = llm_timeout
+        # Ensure the lower-level model client uses the same request timeout
+        models.request_timeout = llm_timeout
 
     actual_edit_format = edit_format or main_model.edit_format
     coder = Coder.create(
@@ -355,6 +357,8 @@ def run_single_task(
             task_timed_out = True
             break
         main_model.timeout = call_timeout
+        # Propagate the per-call timeout down to the model client
+        models.request_timeout = call_timeout
 
         start = datetime.datetime.now().timestamp()
 

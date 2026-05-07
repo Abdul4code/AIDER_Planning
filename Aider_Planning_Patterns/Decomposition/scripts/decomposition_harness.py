@@ -930,6 +930,11 @@ def main() -> int:
 
     extra_instructions = os.environ.get("AIDER_BENCH_EXTRA_INSTRUCTIONS", "").strip()
 
+    # Propagate LLM timeout to the model client implementation so underlying
+    # requests honor the harness-level limits (prevents falling back to 600s).
+    if llm_timeout and llm_timeout > 0:
+        models.request_timeout = llm_timeout
+
     def work(ex_dir: Path) -> dict[str, Any]:
         rel = ex_dir.relative_to(exercises_root)
         testdir = run_root / rel
