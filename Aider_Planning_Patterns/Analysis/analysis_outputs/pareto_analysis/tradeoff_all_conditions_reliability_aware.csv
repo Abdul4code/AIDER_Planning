@@ -1,0 +1,16 @@
+pattern_paper_name,model,total_runs,successes,total_energy_j,mean_energy_j,mean_duration_s,valid_output_rate_pct,no_output_rate_pct,completion_rate_all_runs_pct,success_rate_all_runs_pct,energy_j_per_submitted_success,pareto_reliability_two_objective,pareto_reliability_three_objective
+baseline,qwen3:4b,100,51,2191794.264,21917.94,412.07,76.0,24.0,51.0,51.0,42976.36,False,False
+baseline,qwen3:8b,100,58,1760994.29754,17609.94,343.0,75.0,25.0,58.0,58.0,30361.97,True,True
+baseline,qwen3:14b,100,50,1689198.5016,16891.99,494.51,100.0,0.0,50.0,50.0,33783.97,False,False
+memory,qwen3:4b,100,13,4180067.658072,41800.68,800.24,13.0,87.0,13.0,13.0,321543.67,False,False
+memory,qwen3:8b,100,52,2043616.130712,20436.16,397.13,73.0,27.0,52.0,52.0,39300.31,False,False
+memory,qwen3:14b,100,45,2451099.9204,24511.0,561.64,91.0,9.0,45.0,45.0,54468.89,False,False
+decomposition,qwen3:4b,100,28,2029073.213304,20290.73,425.29,100.0,0.0,28.0,28.0,72466.9,False,False
+decomposition,qwen3:8b,100,28,2634054.590052,26340.55,463.62,100.0,0.0,28.0,28.0,94073.38,False,False
+decomposition,qwen3:14b,100,21,1823298.9552,18232.99,746.07,100.0,0.0,21.0,21.0,86823.76,False,False
+reflection,qwen3:4b,100,51,4407005.48472,44070.05,476.3,84.0,16.0,51.0,51.0,86411.87,False,False
+reflection,qwen3:8b,100,53,4328309.988,43283.1,468.82,82.0,18.0,53.0,53.0,81666.23,False,True
+reflection,qwen3:14b,100,43,5656586.526,56565.87,668.3,100.0,0.0,43.0,43.0,131548.52,False,False
+multiplan,qwen3:4b,100,40,1434836.594268,14348.37,336.71,100.0,0.0,40.0,40.0,35870.91,False,False
+multiplan,qwen3:8b,100,52,1748427.217884,17484.27,328.36,100.0,0.0,52.0,52.0,33623.6,False,True
+multiplan,qwen3:14b,100,41,2458494.8064,24584.95,638.62,100.0,0.0,41.0,41.0,59963.29,False,False

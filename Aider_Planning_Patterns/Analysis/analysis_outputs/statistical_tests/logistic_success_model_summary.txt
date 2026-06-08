@@ -1,0 +1,129 @@
+                 Generalized Linear Model Regression Results                  
+==============================================================================
+Dep. Variable:                success   No. Observations:                 1294
+Model:                            GLM   Df Residuals:                     1180
+Model Family:                Binomial   Df Model:                          113
+Link Function:                  Logit   Scale:                          1.0000
+Method:                          IRLS   Log-Likelihood:                -303.60
+Date:                Sun, 07 Jun 2026   Deviance:                       607.19
+Time:                        13:43:56   Pearson chi2:                 1.45e+03
+No. Iterations:                    25   Pseudo R-squ. (CS):             0.5999
+Covariance Type:            nonrobust                                         
+================================================================================================================================
+                                                                   coef    std err          z      P>|z|      [0.025      0.975]
+--------------------------------------------------------------------------------------------------------------------------------
+Intercept                                                       28.6488   7.85e+04      0.000      1.000   -1.54e+05    1.54e+05
+C(pattern_paper_name)[T.memory]                                 21.2178   8.71e+04      0.000      1.000   -1.71e+05    1.71e+05
+C(pattern_paper_name)[T.decomposition]                          -3.3409      0.578     -5.779      0.000      -4.474      -2.208
+C(pattern_paper_name)[T.reflection]                             -0.3381      0.556     -0.608      0.543      -1.428       0.752
+C(pattern_paper_name)[T.multiplan]                              -1.8820      0.545     -3.455      0.001      -2.950      -0.814
+C(model)[T.qwen3:8b]                                             2.2524      0.764      2.948      0.003       0.755       3.750
+C(model)[T.qwen3:14b]                                           -0.7187      0.542     -1.327      0.185      -1.781       0.343
+C(task_name)[T.acronym]                                        -28.0734   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.affine-cipher]                                  -27.4903   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.all-your-base]                                  -27.2000   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.allergies]                                      -25.6106   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.alphametics]                                    -30.1874   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.anagram]                                        -29.0507   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.armstrong-numbers]                              -23.8613   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.atbash-cipher]                                  -29.6253   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.bank-account]                                   -27.6419   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.beer-song]                                      -31.1757   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.binary]                                         -25.6664   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.binary-search]                                  -23.8613   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.binary-search-tree]                             -28.5128   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.bob]                                            -26.2274   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.book-store]                                     -53.6819   1.35e+05     -0.000      1.000   -2.65e+05    2.65e+05
+C(task_name)[T.bottle-song]                                    -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.bowling]                                        -53.9981   1.29e+05     -0.000      1.000   -2.54e+05    2.54e+05
+C(task_name)[T.camicia]                                        -54.1519   1.26e+05     -0.000      1.000   -2.46e+05    2.46e+05
+C(task_name)[T.change]                                         -29.1218   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.circular-buffer]                                -27.8379   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.clock]                                          -26.7294   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.collatz-conjecture]                             -23.8613   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.complex-numbers]                                -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.connect]                                        -53.6819   1.35e+05     -0.000      1.000   -2.65e+05    2.65e+05
+C(task_name)[T.crypto-square]                                  -29.2554   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.custom-set]                                     -25.6106   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.darts]                                          -25.6106   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.diamond]                                        -28.6568   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.difference-of-squares]                        -5.256e-05   1.11e+05  -4.74e-10      1.000   -2.18e+05    2.18e+05
+C(task_name)[T.diffie-hellman]                                 -23.8613   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.dnd-character]                                  -28.5128   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.dominoes]                                       -29.2554   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.dot-dsl]                                        -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.eliuds-eggs]                                    -24.8819   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.error-handling]                                 -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.etl]                                            -25.6106   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.flatten-array]                                  -23.8613   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.flower-field]                                   -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.food-chain]                                     -55.1558   1.17e+05     -0.000      1.000    -2.3e+05     2.3e+05
+C(task_name)[T.forth]                                          -53.6819   1.35e+05     -0.000      1.000   -2.65e+05    2.65e+05
+C(task_name)[T.game-of-life]                                   -26.2916   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.gigasecond]                                       0.0522   1.13e+05   4.63e-07      1.000   -2.21e+05    2.21e+05
+C(task_name)[T.go-counting]                                    -55.1558   1.17e+05     -0.000      1.000    -2.3e+05     2.3e+05
+C(task_name)[T.grade-school]                                   -30.1874   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.grains]                                         -24.8819   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.grep]                                           -55.1389   1.15e+05     -0.000      1.000   -2.26e+05    2.26e+05
+C(task_name)[T.hamming]                                        -24.8819   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.hangman]                                        -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.hello-world]                                  -5.255e-05   1.11e+05  -4.74e-10      1.000   -2.18e+05    2.18e+05
+C(task_name)[T.hexadecimal]                                    -26.7294   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.high-scores]                                    -27.6419   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.house]                                          -29.0507   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.isbn-verifier]                                  -25.6106   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.isogram]                                          0.0727   1.13e+05   6.43e-07      1.000   -2.22e+05    2.22e+05
+C(task_name)[T.killer-sudoku-helper]                           -27.2000   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.kindergarten-garden]                            -28.2511   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.knapsack]                                       -24.8819   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.largest-series-product]                         -27.6419   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.leap]                                             0.0727   1.13e+05   6.43e-07      1.000   -2.22e+05    2.22e+05
+C(task_name)[T.ledger]                                         -30.0377   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.line-up]                                        -25.6106   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.linked-list]                                    -26.7294   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.list-ops]                                       -30.1874   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.luhn]                                           -26.3215   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.markdown]                                       -30.0377   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.matching-brackets]                                0.0727   1.13e+05   6.43e-07      1.000   -2.22e+05    2.22e+05
+C(task_name)[T.matrix]                                         -23.8625   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.meetup]                                         -53.8492    1.3e+05     -0.000      1.000   -2.56e+05    2.56e+05
+C(task_name)[T.minesweeper]                                    -28.8330   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.nth-prime]                                      -25.6664   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.ocr-numbers]                                    -53.6819   1.35e+05     -0.000      1.000   -2.65e+05    2.65e+05
+C(task_name)[T.octal]                                          -27.6419   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.paasio]                                         -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.palindrome-products]                            -28.3570   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.pangram]                                      -5.255e-05   1.11e+05  -4.74e-10      1.000   -2.18e+05    2.18e+05
+C(task_name)[T.pascals-triangle]                               -27.2000   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.perfect-numbers]                                -24.8819   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.phone-number]                                   -55.0445    1.2e+05     -0.000      1.000   -2.35e+05    2.35e+05
+C(task_name)[T.pig-latin]                                      -30.6491   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.point-mutations]                                -26.7294   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.poker]                                          -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.pov]                                            -53.7464   1.35e+05     -0.000      1.000   -2.64e+05    2.64e+05
+C(task_name)[T.prime-factors]                                    0.0522   1.13e+05   4.63e-07      1.000   -2.21e+05    2.21e+05
+C(task_name)[T.protein-translation]                            -26.2143   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.proverb]                                        -30.1874   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.pythagorean-triplet]                            -26.2092   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.queen-attack]                                   -26.7294   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.rail-fence-cipher]                              -53.6819   1.35e+05     -0.000      1.000   -2.65e+05    2.65e+05
+C(task_name)[T.raindrops]                                        0.0727   1.13e+05   6.43e-07      1.000   -2.22e+05    2.22e+05
+C(task_name)[T.rational-numbers]                               -27.0165   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.react]                                          -55.1416   1.14e+05     -0.000      1.000   -2.23e+05    2.23e+05
+C(task_name)[T.rectangles]                                     -29.8618   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.relative-distance]                              -54.0360   1.26e+05     -0.000      1.000   -2.48e+05    2.48e+05
+C(task_name)[T.resistor-color]                                 -23.8613   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.resistor-color-duo]                               0.1613   1.16e+05   1.39e-06      1.000   -2.27e+05    2.27e+05
+C(task_name)[T.resistor-color-expert]                          -53.6819   1.35e+05     -0.000      1.000   -2.65e+05    2.65e+05
+C(task_name)[T.resistor-color-trio]                            -29.8618   7.85e+04     -0.000      1.000   -1.54e+05    1.54e+05
+C(task_name)[T.rest-api]                                       -54.4463   1.21e+05     -0.000      1.000   -2.38e+05    2.38e+05
+C(task_name)[T.reverse-string]                                   0.0818   1.13e+05   7.22e-07      1.000   -2.22e+05    2.22e+05
+C(pattern_paper_name)[T.memory]:C(model)[T.qwen3:8b]           -22.5128   8.71e+04     -0.000      1.000   -1.71e+05    1.71e+05
+C(pattern_paper_name)[T.decomposition]:C(model)[T.qwen3:8b]     -2.2524      0.923     -2.440      0.015      -4.062      -0.443
+C(pattern_paper_name)[T.reflection]:C(model)[T.qwen3:8b]        -1.6628      0.939     -1.771      0.077      -3.503       0.177
+C(pattern_paper_name)[T.multiplan]:C(model)[T.qwen3:8b]         -0.8473      0.904     -0.938      0.348      -2.619       0.924
+C(pattern_paper_name)[T.memory]:C(model)[T.qwen3:14b]          -21.1239   8.71e+04     -0.000      1.000   -1.71e+05    1.71e+05
+C(pattern_paper_name)[T.decomposition]:C(model)[T.qwen3:14b]    -0.3538      0.785     -0.451      0.652      -1.892       1.184
+C(pattern_paper_name)[T.reflection]:C(model)[T.qwen3:14b]       -0.4800      0.739     -0.650      0.516      -1.928       0.968
+C(pattern_paper_name)[T.multiplan]:C(model)[T.qwen3:14b]         0.8338      0.724      1.152      0.249      -0.585       2.253
+================================================================================================================================

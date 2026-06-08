@@ -1,0 +1,16 @@
+pattern_paper_name,model,total_runs,valid_inference_runs,zero_inference_runs,completed_runs,mean_energy_all_runs_j,mean_duration_all_runs_s,valid_inference_rate_pct,zero_inference_rate_pct,completion_rate_all_runs_pct
+baseline,qwen3:4b,100,76,24,51,21917.94,412.07,76.0,24.0,51.0
+baseline,qwen3:8b,100,75,25,58,17609.94,343.0,75.0,25.0,58.0
+baseline,qwen3:14b,100,100,0,50,16891.99,494.51,100.0,0.0,50.0
+memory,qwen3:4b,100,13,87,13,41800.68,800.24,13.0,87.0,13.0
+memory,qwen3:8b,100,73,27,52,20436.16,397.13,73.0,27.0,52.0
+memory,qwen3:14b,100,91,9,45,24511.0,561.64,91.0,9.0,45.0
+decomposition,qwen3:4b,100,100,0,28,20290.73,425.29,100.0,0.0,28.0
+decomposition,qwen3:8b,100,100,0,28,26340.55,463.62,100.0,0.0,28.0
+decomposition,qwen3:14b,100,100,0,21,18232.99,746.07,100.0,0.0,21.0
+reflection,qwen3:4b,100,84,16,51,44070.05,476.3,84.0,16.0,51.0
+reflection,qwen3:8b,100,82,18,53,43283.1,468.82,82.0,18.0,53.0
+reflection,qwen3:14b,100,100,0,43,56565.87,668.3,100.0,0.0,43.0
+multiplan,qwen3:4b,100,100,0,40,14348.37,336.71,100.0,0.0,40.0
+multiplan,qwen3:8b,100,100,0,52,17484.27,328.36,100.0,0.0,52.0
+multiplan,qwen3:14b,100,100,0,41,24584.95,638.62,100.0,0.0,41.0

@@ -1,0 +1,2 @@
+pattern_paper_name,model,n_runs,successes,success_rate_pct,mean_energy_j,energy_j_per_success,mean_duration_s,mean_total_tokens,mean_llm_calls,valid_output_rate_pct,no_output_rate_pct,completion_rate_all_runs_pct,pareto_inference_only
+memory,qwen3:4b,13,13,100.0,5662.62,5662.62,132.65,2964.85,1.0,13.0,87.0,13.0,True

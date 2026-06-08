@@ -1,0 +1,16 @@
+pattern_paper_name,model,total_runs,zero_inference_runs,zero_inference_rate_pct
+baseline,qwen3:4b,100,24,24.0
+baseline,qwen3:8b,100,25,25.0
+baseline,qwen3:14b,100,0,0.0
+memory,qwen3:4b,100,87,87.0
+memory,qwen3:8b,100,27,27.0
+memory,qwen3:14b,100,9,9.0
+decomposition,qwen3:4b,100,0,0.0
+decomposition,qwen3:8b,100,0,0.0
+decomposition,qwen3:14b,100,0,0.0
+reflection,qwen3:4b,100,16,16.0
+reflection,qwen3:8b,100,18,18.0
+reflection,qwen3:14b,100,0,0.0
+multiplan,qwen3:4b,100,0,0.0
+multiplan,qwen3:8b,100,0,0.0
+multiplan,qwen3:14b,100,0,0.0

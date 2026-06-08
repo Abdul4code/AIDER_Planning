@@ -1,0 +1,10 @@
+metric,value
+Number of valid runs,1500.0
+Number of unique tasks,100.0
+Number of planning patterns,5.0
+Number of model configurations,3.0
+Overall success rate,0.41733333333333333
+Mean duration seconds,504.04579579486403
+Mean energy joules,27224.572098768007
+Mean total tokens,11374.399333333333
+Mean LLM calls,3.6853333333333333

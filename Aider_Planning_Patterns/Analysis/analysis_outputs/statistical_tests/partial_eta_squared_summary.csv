@@ -1,0 +1,17 @@
+dependent_variable,label,effect,partial_eta_squared,p_value
+log_duration_s,Execution time,C(task_name),0.6151808366088455,2.5087611084372842e-182
+log_duration_s,Execution time,C(pattern_paper_name),0.29022364943339013,2.4992708906384886e-86
+log_duration_s,Execution time,C(model),0.2438994952890486,2.301025849348341e-72
+log_duration_s,Execution time,C(pattern_paper_name):C(model),0.023871990109810514,0.0003752075932968031
+log_energy_j,Runtime energy consumption,C(task_name),0.5851624082432754,3.940028481677188e-164
+log_energy_j,Runtime energy consumption,C(pattern_paper_name),0.30901837526201026,3.535459477894376e-93
+log_energy_j,Runtime energy consumption,C(model),0.09309400615671022,9.156734091947342e-26
+log_energy_j,Runtime energy consumption,C(pattern_paper_name):C(model),0.06374935042276376,1.277479432078694e-13
+log_llm_calls,LLM call count,C(pattern_paper_name),0.8315848930452563,0.0
+log_llm_calls,LLM call count,C(task_name),0.13608031278650606,1.3372689924920949e-06
+log_llm_calls,LLM call count,C(pattern_paper_name):C(model),0.028843303244949867,3.131261926132417e-05
+log_llm_calls,LLM call count,C(model),0.017195935071124296,3.593329187569916e-05
+log_total_tokens,Total token usage,C(pattern_paper_name),0.14311184013657335,2.2744929440655922e-38
+log_total_tokens,Total token usage,C(task_name),0.11332059632731631,0.0011109261274330185
+log_total_tokens,Total token usage,C(pattern_paper_name):C(model),0.05667404774149169,7.701844919442551e-12
+log_total_tokens,Total token usage,C(model),0.056240521151026825,1.4729319643978424e-15

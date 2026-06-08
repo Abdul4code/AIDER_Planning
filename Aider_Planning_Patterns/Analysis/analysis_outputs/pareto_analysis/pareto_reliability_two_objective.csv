@@ -1,0 +1,2 @@
+pattern_paper_name,model,total_runs,successes,total_energy_j,mean_energy_j,mean_duration_s,valid_output_rate_pct,no_output_rate_pct,completion_rate_all_runs_pct,success_rate_all_runs_pct,energy_j_per_submitted_success,pareto_reliability_two_objective
+baseline,qwen3:8b,100,58,1760994.29754,17609.94,343.0,75.0,25.0,58.0,58.0,30361.97,True

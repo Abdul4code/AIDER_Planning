@@ -1,0 +1,13 @@
+pattern_paper_name,model,delta_success_rate_pct,delta_energy_j_per_success,delta_mean_energy_j,delta_mean_duration_s,delta_mean_total_tokens,delta_mean_llm_calls,higher_success_than_baseline,lower_energy_per_success_than_baseline,lower_mean_energy_than_baseline,faster_than_baseline,fewer_tokens_than_baseline,fewer_llm_calls_than_baseline
+memory,qwen3:4b,32.89,-15104.3,-8273.08,-125.33,-4729.57,-0.34,True,True,True,True,True,True
+memory,qwen3:8b,-6.1,4778.48,2792.6,53.8,812.85,-0.03,False,False,False,False,False,True
+memory,qwen3:14b,-0.55,-2235.76,-1291.23,33.67,1494.08,0.11,False,True,True,False,False,False
+decomposition,qwen3:4b,-39.11,51699.98,6355.03,167.31,17779.01,4.62,False,False,False,False,False,False
+decomposition,qwen3:8b,-49.33,84053.6,18591.92,306.29,7798.51,3.49,False,False,False,False,False,False
+decomposition,qwen3:14b,-29.0,53039.79,1341.0,251.56,3605.53,3.74,False,False,False,False,False,False
+reflection,qwen3:4b,-6.4,21239.34,11568.1,137.62,11040.78,1.72,False,False,False,False,False,False
+reflection,qwen3:8b,-12.7,23606.16,13985.21,216.84,11088.67,1.83,False,False,False,False,False,False
+reflection,qwen3:14b,-7.0,97764.55,39673.88,173.79,8173.71,1.91,False,False,False,False,False,False
+multiplan,qwen3:4b,-27.11,15103.99,412.67,78.73,20147.49,6.68,False,False,False,False,False,False
+multiplan,qwen3:8b,-25.33,23603.82,9735.64,171.03,11612.02,6.65,False,False,False,False,False,False
+multiplan,qwen3:14b,-9.0,26179.32,7692.96,144.11,5090.2,6.78,False,False,False,False,False,False

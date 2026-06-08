@@ -1,0 +1,8 @@
+pattern_paper_name,model,status,n,mean_duration_s,mean_energy_j,mean_total_tokens,mean_llm_calls
+baseline,qwen3:4b,failed,24,900.0,47195.057700000005,0.0,0.0
+baseline,qwen3:8b,failed,25,900.0,47193.87964607999,0.0,0.0
+memory,qwen3:4b,failed,87,900.0,47200.615656,0.0,0.0
+memory,qwen3:8b,failed,27,900.0,47189.126168,0.0,0.0
+memory,qwen3:14b,failed,9,900.0,114603.37079999999,0.0,0.0
+reflection,qwen3:4b,failed,16,900.0,141542.88705225,0.0,0.0
+reflection,qwen3:8b,failed,18,900.0,141451.94,0.0,0.0
